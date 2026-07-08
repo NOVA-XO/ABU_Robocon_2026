@@ -51,13 +51,29 @@ typedef struct {
     /* --- дотоод төлөв (гараар бүү хүр) --- */
     float    prev_err;
     float    integral;
+    float    d_filt;      // low-pass шүүсэн derivative (damping, шумгүй)
     uint32_t last_ms;
+    uint8_t  holding;     // (нөөц) hysteresis төлөв
+    uint8_t  home_prev;   // limit switch-ийн өмнөх төлөв (ирмэг таних)
 } Rack_t;
+
+/* -----------------------------------------------------------------------------
+ *  ДООД LIMIT SWITCH (home / encoder 0 цэг)
+ *    Pull-up резистортой тул ДАРАГДСАН (rack доод тулгуур дээр) = 0.
+ *    Тиймээс "home дээр байна" = (val == 0).
+ *
+ *    val2 = Sen2 (PE2) → FRONT rack (мотор 5, counter[0])
+ *    val1 = Sen1 (PE0) → BACK  rack (мотор 6, counter[1])
+ * -----------------------------------------------------------------------------
+ */
+#define FRONT_RACK_HOME  (val2 == 0)   // 1 = урд рак доод тулгуур дээр
+#define BACK_RACK_HOME   (val1 == 0)   // 1 = хойд рак доод тулгуур дээр
 
 extern Rack_t frontRack;   // мотор 5 / counter[0]
 extern Rack_t backRack;    // мотор 6 / counter[1]
 
-void    Rack_SetHome(Rack_t *r);            // үзүүрт аваачаад дуудна (0 цэг)
+uint8_t Rack_SetHome(Rack_t *r);            // limit switch хүртэл доошлуулж 0 цэг тогтооно
+                                            //   return: 1 = амжилттай, 0 = timeout (switch олдсонгүй)
 void    Rack_Reset(Rack_t *r);              // PID төлвийг л цэвэрлэх
 void    Rack_Jog(Rack_t *r, int dir);       // dir: +1 дээш, -1 доош, 0 зогс
 uint8_t Rack_GoTo(Rack_t *r, int target);   // байрлал руу; хүрвэл 1, эс бөгөөс 0
@@ -66,6 +82,13 @@ uint8_t Rack_GoTo(Rack_t *r, int target);   // байрлал руу; хүрвэ
 void    Rack_SetTarget(Rack_t *r, int target);  // зорилт тавьж, active = 1
 void    Rack_Off(Rack_t *r);                    // active = 0, мотор зогсоох
 void    Rack_Service(void);                     // TIM7 ISR-т дуудна (2 ракыг барина)
+
+/* Тааруулга: PS5 D-pad Дээш/Доош-оор тогтмол PWM тааруулах (open-loop тест) */
+int     Rack_PWM_Tune(uint8_t motor);           // motor 5=front / 6=back; буцаана: одоогийн PWM
+void    Rack_PWM_Tune_Dual(void);               // M5: D-Up/Down, M6: Triangle/Cross (тусад нь)
+
+/* Оношилгоо: joystick-оор мотор/encoder/switch-ийн чиглэл, харьяаллыг ХЭМЖИХ */
+void    Rack_Joystick_Test(void);               // LStick Y→M5, RStick Y→M6, Cross→enc тэглэх
 
 /* ---- ADC / OLED туслах --------------------------------------------------- */
 uint16_t Read_PC3(void);

@@ -188,7 +188,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+   HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -216,60 +216,38 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   generalInit();
+
+  /* ===== ОНОШИЛГООНЫ ГОРИМ =====
+   * Rack-ийн мотор/encoder/switch-ийн чиглэл, харьяалал ТОДОРХОЙГҮЙ байгаа тул:
+   *   - Rack_SetHome-ыг ЭНД БҮҮ ДУУД. Доош гэж бодсон зүг нь дээш байвал
+   *     дээд тулгуур руу мөргөж механизмаа эвдэнэ.
+   *   - LPMS/Gyro/Red_Reset энэ тестэд шаардлагагүй (boot-ыг хурдасгана).
+   * Параметрүүдийг хэмжиж тогтоосны дараа доорхыг сэргээнэ.
+   */
+  /*
   LPMS_Init();
-
-  for (int i = 0; i < 50; i++) {
-      LPMS_Read();
-  }
-
+  for (int i = 0; i < 50; i++) { LPMS_Read(); }
   Gyro_ZeroYaw();
-
   Rack_SetHome(&frontRack);
   Rack_SetHome(&backRack);
   Red_Reset();
+  */
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  // ===== ТЕСТ: рак-ийг TIM7 ISR-ээр барих, R1/R2/L1/L2 товчоор зорилт тохируулах =====
-  // Товч дарахад урд/хойд рак ХОЁУЛАА тухайн байрлал руу очиж, ISR тэнд барина.
-  // ESP32 packet-ийн дагуу control_data[3] = { L1, R1, L2, R2 }:
-  //   control_data[3][1] = R1  → 900
-  //   control_data[3][3] = R2  → 1350
-  //   control_data[3][0] = L1  → 1800
-  //   control_data[3][2] = L2  → 0
-  // (Байрлал ↔ товчийг доор чөлөөтэй сольж болно.)
-  Rack_SetTarget(&frontRack, 0);
-  Rack_SetTarget(&backRack, 0);
-
+  // ===== ОНОШИЛГООНЫ ТЕСТ: rack-ийн параметрүүдийг ХЭМЖИЖ тогтоох =====
+  //   Зүүн стик Y   → Мотор 5   (стик ДЭЭШ = эерэг PWM)
+  //   Баруун стик Y → Мотор 6   (стик ДЭЭШ = эерэг PWM)
+  //   Cross (✕)     → encoder-үүдийг 0 болгох
+  //
+  //   OLED:  M5/M6 = PWM,  E0/E1 = counter[0]/counter[1],  S1/S2 = val1/val2
+  //          (S: 1 = суларсан, 0 = ДАРАГДСАН)
+  //
+  //   Limit switch 0 болмогц стикээ СУЛЛА — автомат хамгаалалт байхгүй.
   while (1) {
-      int pos = -1;   // -1 = товч дараагүй
-
-      if      (control_data[3][1]) pos = 900;    // R1
-      else if (control_data[3][3]) pos = 1350;   // R2
-      else if (control_data[3][0]) pos = 1800;   // L1
-      else if (control_data[3][2]) pos = 0;      // L2
-
-      // Товч дарагдсан бол урд/хойд ХОЁУЛАНГ тухайн байрлал руу
-      if (pos >= 0) {
-          Rack_SetTarget(&frontRack, pos);
-          Rack_SetTarget(&backRack,  pos);
-      }
-
-      // --- OLED: зорилт vs бодит encoder (рак ISR-ээр баригдаж байгааг хар) ---
-      colorFill(Black);
-      setCursor(4, 2);
-      printStr("FRONT t:%d", frontRack.target);
-      setCursor(4, 14);
-      printStr("  enc:%d", counter[0]);
-      setCursor(4, 30);
-      printStr("BACK  t:%d", backRack.target);
-      setCursor(4, 42);
-      printStr("  enc:%d", counter[1]);
-      setScreen();
-
-      HAL_Delay(20);
+      Rack_Joystick_Test();
   }
     /* USER CODE END WHILE */
 
