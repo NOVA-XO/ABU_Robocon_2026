@@ -1,0 +1,42 @@
+# ============================================================
+#  STM32CubeIDE / CMake build артефактууд
+# ============================================================
+
+# CMake build directories
+build
+build*/
+/Build/
+cmake-build-*/
+Debug/
+Release/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Compiler / linker output
+*.o
+*.obj
+*.a
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.lst
+*.su
+*.d
+
+# STM32CubeMX
+mx.scratch
+
+# VS Code / OS
+.cache/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# .settings-ийг track хийнэ (STM32CubeIDE тохиргоо)
+!.settings
