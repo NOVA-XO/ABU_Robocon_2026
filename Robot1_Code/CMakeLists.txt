@@ -46,11 +46,6 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${CMAKE_SOURCE_DIR}/Core/Src/general.c
-    ${CMAKE_SOURCE_DIR}/Core/Src/lpms.c
-    ${CMAKE_SOURCE_DIR}/Core/Src/red.c
-    ${CMAKE_SOURCE_DIR}/Core/Src/blue.c
-    ${CMAKE_SOURCE_DIR}/Core/Src/sequence.c
-    ${CMAKE_SOURCE_DIR}/Core/Src/bno055.c
     ${CMAKE_SOURCE_DIR}/Core/Src/default.c
     ${CMAKE_SOURCE_DIR}/Core/Src/pca9685.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ssd1306.c

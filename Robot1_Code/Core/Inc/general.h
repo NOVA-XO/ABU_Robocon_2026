@@ -1,5 +1,6 @@
 /* =============================================================================
- *  general.h — Хөдөлгөөний өндөр түвшний удирдлага (mecanum, rack, gyro)
+ *  general.h — Хөдөлгөөний өндөр түвшний удирдлага (mecanum, rack)
+ *              (гар удирдлагатай робот — gyro/autonomous хэсэг хасагдсан)
  *
  *  Төсөл : STM32F407 Robot Firmware
  *  Огноо : Jul 1, 2026
@@ -13,16 +14,11 @@
 #include "main.h"
 #include "ssd1306.h"
 #include "default.h"
-#include "lpms.h"
 #include <stdbool.h>
 
 /* ---- Mecanum удирдлага --------------------------------------------------- */
 int  applyDeadzone(int v);            // джойстик утгыг үхмэл бүсээр шүүх
 void runner(void);                    // джойстикоор mecanum хөдөлгөөн
-void Drive_Straight(int base_pwm);    // gyro-гоор шулуун явах
-
-/* ---- Gyro-д суурилсан эргэлт --------------------------------------------- */
-uint8_t Gyro_TurnAngle(float angle);  // харьцангуй өнцгөөр эргэх (non-blocking)
 
 /* -----------------------------------------------------------------------------
  *  Rack_t — Нэг рак = нэг мотор + нэг encoder + өөрийн БҮРЭН PID

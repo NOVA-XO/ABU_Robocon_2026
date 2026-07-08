@@ -22,14 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "lpms.h"
 #include "general.h"
 #include "test.h"
 #include <stdio.h>
-#include "red.h"
-#include "blue.h"
-#include "sequence.h"
-//#include "lpms.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -217,37 +212,18 @@ int main(void)
   /* USER CODE BEGIN 2 */
   generalInit();
 
-  /* ===== ОНОШИЛГООНЫ ГОРИМ =====
-   * Rack-ийн мотор/encoder/switch-ийн чиглэл, харьяалал ТОДОРХОЙГҮЙ байгаа тул:
-   *   - Rack_SetHome-ыг ЭНД БҮҮ ДУУД. Доош гэж бодсон зүг нь дээш байвал
-   *     дээд тулгуур руу мөргөж механизмаа эвдэнэ.
-   *   - LPMS/Gyro/Red_Reset энэ тестэд шаардлагагүй (boot-ыг хурдасгана).
-   * Параметрүүдийг хэмжиж тогтоосны дараа доорхыг сэргээнэ.
+  /* ГАР УДИРДЛАГАТАЙ РОБОТ (manual)
+   *   Autonomous хэсэг (LPMS gyro, sequence, red/blue) хасагдсан.
+   *   PS5 джойстикоор mecanum жолоодоно; серво/соленоид/brush зэрэг товчны
+   *   удирдлагыг while(1) дотор нэмнэ.
    */
-  /*
-  LPMS_Init();
-  for (int i = 0; i < 50; i++) { LPMS_Read(); }
-  Gyro_ZeroYaw();
-  Rack_SetHome(&frontRack);
-  Rack_SetHome(&backRack);
-  Red_Reset();
-  */
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
-  // ===== ОНОШИЛГООНЫ ТЕСТ: rack-ийн параметрүүдийг ХЭМЖИЖ тогтоох =====
-  //   Зүүн стик Y   → Мотор 5   (стик ДЭЭШ = эерэг PWM)
-  //   Баруун стик Y → Мотор 6   (стик ДЭЭШ = эерэг PWM)
-  //   Cross (✕)     → encoder-үүдийг 0 болгох
-  //
-  //   OLED:  M5/M6 = PWM,  E0/E1 = counter[0]/counter[1],  S1/S2 = val1/val2
-  //          (S: 1 = суларсан, 0 = ДАРАГДСАН)
-  //
-  //   Limit switch 0 болмогц стикээ СУЛЛА — автомат хамгаалалт байхгүй.
   while (1) {
-      Rack_Joystick_Test();
+      runner();   // PS5 джойстикоор mecanum хөдөлгөөн (control_data-аас)
+      // TODO: серво / соленоид / brush / rack товчны удирдлага энд нэмэх
   }
     /* USER CODE END WHILE */
 
