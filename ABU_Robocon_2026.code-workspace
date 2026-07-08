@@ -1,0 +1,13 @@
+{
+  // ABU Robocon 2026 — хоёр роботыг зэрэг нээх multi-root workspace.
+  // Нээх: File → Open Workspace from File… → энэ файлыг сонго
+  //       (энэ чатыг хадгалахын тулд New Window дээр нээхийг зөвлөе).
+  "folders": [
+    { "path": "Robot1_Code", "name": "Robot1 (manual)" },
+    { "path": "Robot2_Code", "name": "Robot2 (auto)" }
+  ],
+  "settings": {
+    // Folder бүр өөрийн .vscode/settings.json-той (CMake / clangd тохиргоо),
+    // тэдгээр нь энэ дээр давхарлагдана. Энд workspace түвшний нэмэлт байхгүй.
+  }
+}
