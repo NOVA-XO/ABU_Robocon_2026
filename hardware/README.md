@@ -28,6 +28,19 @@ PCB дээр **BNO055** (I2C) талбай бий ч, одоогийн Robot2 fi
 |------|---------|
 | `pcb.png` | PCB routing зураг (root README-д харагдана) |
 | `schematics/sheet1_main.png` … `sheet6_motor.png` | 6 schematic хуудас |
-| `pcb_3d.obj` + `pcb_3d.mtl` | *(сонголт)* 3D загвар |
+| `pcb_3d.obj` + `pcb_3d.mtl` | ✅ Орсон — PCB 3D загвар (Git LFS) |
 
 Зураг нэмэгдэхэд root [../README.md](../README.md) болон энд автоматаар харагдана.
+
+## 3D загвар (Git LFS)
+
+`pcb_3d.obj` (21 MB) нь **Git LFS**-ээр хадгалагдсан. Clone хийхэд бодит файлыг
+татахын тулд **git-lfs суусан** байх ёстой:
+
+```
+git lfs install
+git clone https://github.com/NOVA-XO/ABU_Robocon_2026.git
+```
+
+git-lfs байхгүй бол зөвхөн заагч (pointer) файл татагдана. GitHub 3D-г README-д
+шууд харуулахгүй — татаж аваад `.mtl`-тэй хамт 3D viewer-т нээж үзнэ.
