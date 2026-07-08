@@ -7,6 +7,12 @@
     { "path": "Robot2_Code", "name": "Robot2 (auto)" }
   ],
   "settings": {
+    "stm32cube-ide-clangd.path": "cube",
+    "stm32cube-ide-clangd.arguments": [
+      "starm-clangd",
+      "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc*",
+      "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-g++*"
+    ]
     // Folder бүр өөрийн .vscode/settings.json-той (CMake / clangd тохиргоо),
     // тэдгээр нь энэ дээр давхарлагдана. Энд workspace түвшний нэмэлт байхгүй.
   }

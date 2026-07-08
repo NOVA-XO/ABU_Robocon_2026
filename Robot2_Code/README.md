@@ -1,8 +1,11 @@
-# ABU Robocon 2026 — STM32 Robot Firmware
+# ABU Robocon 2026 — Robot2 (Автомат робот)
 
-STM32F407 дээр суурилсан робот удирдлагын firmware. PS5 контроллероор (ESP32
+STM32F407 дээр суурилсан **автомат** роботын firmware. PS5 контроллероор (ESP32
 гүүрээр дамжуулан) удирдах, mecanum жолоо, encoder-т суурилсан rack PID,
 LPMS-BE2 gyro-гоор чиг баримжаа барих, OLED дэлгэц зэргийг агуулна.
+
+> 🎮 Гар удирдлагатай робот → [`../Robot1_Code`](../Robot1_Code) ·
+> хоёул нэг ижил PCB дээр ажиллана → [../README.md](../README.md)
 
 ## Онцлог (Features)
 
@@ -63,6 +66,6 @@ cmake --build build
 
 ## ESP32 PS5 гүүр
 
-`ps5_esp32_bridge.ino` — ESP32 дээр Arduino IDE-гээр ачаална
-(STM32 build-д ороогүй). PS5 контроллерийг Bluetooth-оор холбож, 23 байтын
-packet-ийг UART-аар STM32 руу илгээнэ.
+Хоёр роботод нийтлэг ESP32 гүүр репо root-д: [`../ps5_esp32_bridge/`](../ps5_esp32_bridge).
+ESP32 дээр Arduino IDE-гээр ачаална (STM32 build-д ороогүй). PS5 контроллерийг
+Bluetooth-оор холбож, 23 байтын packet-ийг UART-аар STM32 руу илгээнэ.
