@@ -214,16 +214,17 @@ int main(void)
 
   /* ГАР УДИРДЛАГАТАЙ РОБОТ (manual)
    *   Autonomous хэсэг (LPMS gyro, sequence, red/blue) хасагдсан.
-   *   PS5 джойстикоор mecanum жолоодоно; серво/соленоид/brush зэрэг товчны
-   *   удирдлагыг while(1) дотор нэмнэ.
+   *   PS5 джойстикоор differential (tank) жолоодоно; серво/соленоид/brush зэрэг
+   *   товчны удирдлагыг while(1) дотор нэмнэ.
    */
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-      runner();   // PS5 джойстикоор mecanum хөдөлгөөн (control_data-аас)
-      // TODO: серво / соленоид / brush / rack товчны удирдлага энд нэмэх
+      runner();   // PS5 джойстикоор differential (tank) жолоодлого (control_data-аас)
+      test_joyStick();
+      // TODO: серво / соленоид / brush товчны удирдлага энд нэмэх
   }
     /* USER CODE END WHILE */
 

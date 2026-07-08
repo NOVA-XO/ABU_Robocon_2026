@@ -22,7 +22,6 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "general.h"   // Rack_Service (TIM7 ISR-т рак барих)
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -285,7 +284,6 @@ void TIM7_IRQHandler(void)
   /* USER CODE BEGIN TIM7_IRQn 1 */
   timer++;
   second++;
-  Rack_Service();   // рак(ууд)-ыг зорилтод нь байнга барих (active бол)
   /* USER CODE END TIM7_IRQn 1 */
 }
 
