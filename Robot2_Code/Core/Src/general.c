@@ -8,6 +8,7 @@
  * =============================================================================
  */
 #include "general.h"
+#include <stdlib.h>   // abs() — runner() дахь mecanum нормчлолд хэрэглэнэ
 
 /* ---- main.c дахь periphery handle-ууд ---------------------------------- */
 extern I2C_HandleTypeDef hi2c2;
