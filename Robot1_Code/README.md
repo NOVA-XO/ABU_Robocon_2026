@@ -1,16 +1,19 @@
 # ABU Robocon 2026 — Robot1 (Гар удирдлагатай робот)
 
 STM32F407 дээр суурилсан **гар удирдлагатай (manual)** роботын firmware. PS5
-контроллероор (ESP32 гүүрээр дамжуулан) mecanum жолоодлого хийнэ. Автомат
-хэсэг (gyro, sequence, red/blue) энэ роботод **байхгүй**.
+контроллероор (ESP32 гүүрээр дамжуулан) **differential (tank)** жолоодлого хийнэ.
+Автомат хэсэг (gyro, sequence, red/blue) болон rack энэ роботод **байхгүй**.
+
+> ⚠️ **Төлөв:** жолоодлого бэлэн. Актуаторын үйлдлүүд (серво/соленоид/brush товч)
+> хараахан бичигдээгүй — [#2](https://github.com/NOVA-XO/ABU_Robocon_2026/issues/2).
 
 > 🤖 Автомат робот → [`../Robot2_Code`](../Robot2_Code) ·
 > хоёул нэг ижил PCB дээр ажиллана → [../README.md](../README.md)
 
 ## Онцлог (Features)
 
-- **Mecanum жолоо** — 4 моторын inverse kinematics (`runner`)
-- **Rack** — Мотор 5, 6-г encoder-аар байрлалд барих PID (гараар ашиглаж болно)
+- **Differential (tank) жолоо** — зүүн/баруун талын mixing (`runner`); урагш
+  ба эргэлт тус тусын коэффициенттэй (`SPEED_GAIN`, `TURN_GAIN`)
 - **PS5 контроллер** — ESP32 гүүр 23 байтын packet-ийг 100 Hz-ээр UART-аар илгээнэ
 - **Периферал** — SSD1306 OLED, PCA9685, соленоид, серво, brush
 
@@ -21,7 +24,7 @@ STM32F407 дээр суурилсан **гар удирдлагатай (manual)
 | MCU | STM32F407 |
 | Дэлгэц | SSD1306 OLED (I2C2) |
 | Контроллер | PS5 → ESP32 → UART (USART3) |
-| Мотор | 6 × DC (encoder-тэй), серво, brush, соленоид |
+| Мотор | 4 × DC жолоо (differential), серво, brush, соленоид |
 
 ## Файлын бүтэц (Core/Src)
 
@@ -29,7 +32,7 @@ STM32F407 дээр суурилсан **гар удирдлагатай (manual)
 |------|-------|
 | `main.c` | Entry point, periphery init, PS5 packet задлах, гар удирдлагын гогцоо |
 | `default.c` | Суурь драйвер (мотор, соленоид, серво, UART) |
-| `general.c` | Mecanum (`runner`) + rack PID |
+| `general.c` | Differential жолоо (`runner`), ADC, USB CDC |
 | `test.c` | Тоног төхөөрөмжийн тест функцууд |
 | `pca9685.c`, `ssd1306*.c` | Гуравдагч этгээдийн сангууд |
 

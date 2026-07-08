@@ -8,7 +8,7 @@
 
 | Фолдер | Робот | Тайлбар |
 |--------|-------|---------|
-| [`Robot1_Code/`](Robot1_Code) | **Гар удирдлагатай** | PS5-аар mecanum жолоодлого |
+| [`Robot1_Code/`](Robot1_Code) | **Гар удирдлагатай** | PS5-аар differential (tank) жолоодлого |
 | [`Robot2_Code/`](Robot2_Code) | **Автомат** | gyro (LPMS), sequence, red/blue автомат угсралт |
 | [`ps5_esp32_bridge/`](ps5_esp32_bridge) | *(хоёуланд нийтлэг)* | ESP32 PS5→UART гүүр (Arduino) |
 | [`hardware/`](hardware) | *(нийтлэг)* | PCB (EasyEDA) схем / зураг |
