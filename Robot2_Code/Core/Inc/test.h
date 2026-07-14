@@ -14,6 +14,7 @@
 #include "default.h"
 
 void showEncoderStatus(void);   // encoder + timer-ийг OLED дээр харуулах
+void sendEncoderSerial(void);   // encoder 0/1-ийг UART4-ээр илгээх (115200, 100мс тутам)
 void testOptocoupler(void);     // соленоидуудыг control_data-аар шалгах
 void testServo(void);           // серво + brush тест
 void test_sensor(void);         // val1..val8 сенсорыг OLED дээр харуулах

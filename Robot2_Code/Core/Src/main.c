@@ -217,19 +217,32 @@ int main(void)
   /* USER CODE BEGIN 2 */
   generalInit();
 
-  /* ===== ОНОШИЛГООНЫ ГОРИМ =====
-   * Rack-ийн мотор/encoder/switch-ийн чиглэл, харьяалал ТОДОРХОЙГҮЙ байгаа тул:
-   *   - Rack_SetHome-ыг ЭНД БҮҮ ДУУД. Доош гэж бодсон зүг нь дээш байвал
-   *     дээд тулгуур руу мөргөж механизмаа эвдэнэ.
-   *   - LPMS/Gyro/Red_Reset энэ тестэд шаардлагагүй (boot-ыг хурдасгана).
-   * Параметрүүдийг хэмжиж тогтоосны дараа доорхыг сэргээнэ.
+  /* ===== RACK HOMING — encoder-ийн 0 цэгийг доод limit switch дээр тогтоох =====
+   *  Тохируулга ХЭМЖИГДСЭН (Rack_Joystick_Test):
+   *    FRONT = M6 / counter[1] / S2 ,  BACK = M5 / counter[0] / S1
+   *    +PWM → counter ӨСНӨ  ⇒  −PWM нь ракыг доод switch рүү БУУЛГАНА (homing зөв).
+   *
+   *  Preset түвшнүүд 0 цэгээс тоологддог тул homing ЗААВАЛ эхэлж хийгдэнэ.
+   *  Switch олдохгүй бол (timeout) байрлал тодорхойгүй — preset рүү ОРОХГҮЙ.
    */
+  uint8_t home_ok = Rack_SetHome(&frontRack);
+  if (!Rack_SetHome(&backRack)) home_ok = 0;
+
+  if (!home_ok) {
+      colorFill(Black);
+      setCursor(4, 16);
+      printStr("HOMING FAILED");
+      setCursor(4, 36);
+      printStr("check limit sw");
+      setScreen();
+      while (1) { }          // байрлал тодорхойгүй — rack-ийг БҮҮ хөдөлгө
+  }  
+
+  /* LPMS/Gyro/red-blue дараалал энэ горимд хэрэггүй (rack тохируулгын шат) */
   /*
   LPMS_Init();
   for (int i = 0; i < 50; i++) { LPMS_Read(); }
   Gyro_ZeroYaw();
-  Rack_SetHome(&frontRack);
-  Rack_SetHome(&backRack);
   Red_Reset();
   */
   /* USER CODE END 2 */
@@ -237,17 +250,16 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  // ===== ОНОШИЛГООНЫ ТЕСТ: rack-ийн параметрүүдийг ХЭМЖИЖ тогтоох =====
-  //   Зүүн стик Y   → Мотор 5   (стик ДЭЭШ = эерэг PWM)
-  //   Баруун стик Y → Мотор 6   (стик ДЭЭШ = эерэг PWM)
-  //   Cross (✕)     → encoder-үүдийг 0 болгох
+  // ===== RACK PRESET: товч дармагц ХОЁУЛАА тэр түвшин рүү шууд очно =====
+  //   L1 → 0 (доод/home)   L2 → 900   R1 → 1350   R2 → 1800 (дээд)
   //
-  //   OLED:  M5/M6 = PWM,  E0/E1 = counter[0]/counter[1],  S1/S2 = val1/val2
-  //          (S: 1 = суларсан, 0 = ДАРАГДСАН)
-  //
-  //   Limit switch 0 болмогц стикээ СУЛЛА — автомат хамгаалалт байхгүй.
+  //   OLED:  TARGET:<зорилт> / B at:<back> / F at:<front>
+  //   Байрлалыг TIM7 ISR доторх Rack_Service тасралтгүй барина.
   while (1) {
-      Rack_Joystick_Test();
+      Rack_Preset_Control();
+      Servo_Preset_Control();    // Cross/Square/Triangle/Circle → серво өнцөг
+      Rack_Telemetry_Serial();   // тааруулгын TSV → UART4 (115200)
+      runner();
   }
     /* USER CODE END WHILE */
 
