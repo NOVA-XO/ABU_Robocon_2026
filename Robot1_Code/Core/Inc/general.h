@@ -20,6 +20,9 @@
 int  applyDeadzone(int v);            // джойстик утгыг үхмэл бүсээр шүүх
 void runner(void);                    // джойстикоор differential (tank) жолоодлого
 
+/* ---- Актуатор удирдлага -------------------------------------------------- */
+void solenoidControl(void);           // L1/R1/L2/R2 → соленоид 1..4 (debounce + toggle)
+
 /* ---- ADC / OLED туслах --------------------------------------------------- */
 uint16_t Read_PC3(void);
 void     Read_PC3_OLED(void);

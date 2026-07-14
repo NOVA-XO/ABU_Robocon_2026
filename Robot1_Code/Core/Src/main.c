@@ -183,7 +183,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-   HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -222,9 +222,29 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-      runner();   // PS5 джойстикоор differential (tank) жолоодлого (control_data-аас)
       test_joyStick();
-      // TODO: серво / соленоид / brush товчны удирдлага энд нэмэх
+      runner();
+      solenoidControl();                       // L1/R1/L2/R2 → соленоид 1/5/2/4 (debounce + toggle)
+      controlSolenoid(6, control_data[1][1]);  // Square — момент (дарж байхад ON)
+
+      if (control_data[2][2] == 1) {  // Share
+          motor_control(6, 1000);  // M5
+      } else if(control_data[2][0] == 1) {
+          motor_control(6, -1000);  // M5
+      } else {
+          motor_control(6, 0);  // M5
+      }
+
+      if (control_data[1][2] == 1) {  // Triangle
+          motor_control(5, 1000);  // M6
+      } else if(control_data[1][0] == 1) {
+          motor_control(5, -1000);  // M6
+      } else {
+          motor_control(5, 0);  // M6
+      }
+
+
+
   }
     /* USER CODE END WHILE */
 

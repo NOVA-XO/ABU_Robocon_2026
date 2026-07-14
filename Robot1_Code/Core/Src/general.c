@@ -102,6 +102,81 @@ void runner(void) {
 
 
 /* =============================================================================
+ *  СОЛЕНОИД УДИРДЛАГА — L1/R1/L2/R2 товчоор TOGGLE (нэг даралт = нэг сэлгэлт)
+ *
+ *    control_data[3][0] = L1  →  соленоид 1
+ *    control_data[3][1] = R1  →  соленоид 5
+ *    control_data[3][2] = L2  →  соленоид 2
+ *    control_data[3][3] = R2  →  соленоид 4
+ *
+ *  Товч дарах бүрд тухайн соленоид HIGH ↔ LOW сэлгэнэ. Товчийг ДАРААД БАРЬЖ
+ *  байхад давтахгүй (зөвхөн 0→1 ирмэг дээр нэг удаа). Механик чичиргээг
+ *  (bounce) BTN_DEBOUNCE_MS-ээр шүүнэ.
+ *
+ *  Холболт өөрчлөгдвөл зөвхөн SOLENOID_MAP-ыг засна.
+ * =============================================================================
+ */
+#define BTN_DEBOUNCE_MS  25   // товчийг тогтвортой гэж үзэх хугацаа (мс)
+#define SOLENOID_COUNT    4   // control_data[3] дэх товчны тоо
+
+/* control_data[3][i] товч  →  соленоидын дугаар (бодит холболтын дагуу) */
+static const uint8_t SOLENOID_MAP[SOLENOID_COUNT] = { 1, 5, 2, 4 };
+/*                                                    L1 R1 L2 R2 */
+
+typedef struct {
+    uint8_t  stable;      // debounce хийсэн төлөв
+    uint8_t  raw_last;    // сүүлийн түүхий уншилт
+    uint32_t change_ms;   // түүхий төлөв сүүлд өөрчлөгдсөн агшин
+} Btn_t;
+
+/* -----------------------------------------------------------------------------
+ *  btn_pressed — Debounce хийсэн ЦЭВЭР ШИНЭ даралт (rising edge) таних
+ *    return: 1 = дөнгөж дарагдлаа (0→1). Дараад барьж байхад дахин 1 БУЦААХГҮЙ.
+ * -----------------------------------------------------------------------------
+ */
+static uint8_t btn_pressed(Btn_t *b, uint8_t raw) {
+    uint32_t now = HAL_GetTick();
+
+    if (raw != b->raw_last) {          // түүхий төлөв өөрчлөгдвөл цагийг эхлүүлнэ
+        b->raw_last  = raw;
+        b->change_ms = now;
+    }
+
+    // BTN_DEBOUNCE_MS турш тогтвортой байж байж л debounced төлвийг шинэчилнэ
+    if ((now - b->change_ms) >= BTN_DEBOUNCE_MS && b->stable != raw) {
+        b->stable = raw;
+        if (raw) return 1;             // 0 → 1 шилжилт = шинэ даралт
+    }
+
+    return 0;
+}
+
+/* -----------------------------------------------------------------------------
+ *  solenoidControl — L1/R1/L2/R2 тус бүрээр соленоид 1..4-ийг toggle хийх
+ *  Main loop-оос давталт бүрд дуудна (блоклохгүй).
+ * -----------------------------------------------------------------------------
+ */
+void solenoidControl(void) {
+    static Btn_t btn[SOLENOID_COUNT]   = {0};
+    static bool  state[SOLENOID_COUNT] = {false};
+    static bool  inited = false;
+
+    // Эхний дуудалтад бүх соленоидыг OFF болгож, программын төлөвтэй нийцүүлнэ
+    if (!inited) {
+        for (int i = 0; i < SOLENOID_COUNT; i++) controlSolenoid(SOLENOID_MAP[i], false);
+        inited = true;
+    }
+
+    for (int i = 0; i < SOLENOID_COUNT; i++) {
+        if (btn_pressed(&btn[i], (uint8_t)control_data[3][i])) {
+            state[i] = !state[i];                          // HIGH ↔ LOW сэлгэх
+            controlSolenoid(SOLENOID_MAP[i], state[i]);
+        }
+    }
+}
+
+
+/* =============================================================================
  *  ADC (PC3) унших
  * =============================================================================
  */
