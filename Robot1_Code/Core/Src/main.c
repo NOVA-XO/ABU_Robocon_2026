@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -208,7 +207,6 @@ int main(void)
   MX_TIM7_Init();
   MX_TIM13_Init();
   MX_ADC1_Init();
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   generalInit();
 
@@ -222,23 +220,24 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-      test_joyStick();
+      //test_joyStick();
       runner();
       solenoidControl();                       // L1/R1/L2/R2 → соленоид 1/5/2/4 (debounce + toggle)
-      controlSolenoid(6, control_data[1][1]);  // Square — момент (дарж байхад ON)
+      controlSolenoid(5, control_data[2][1]);  // 
+      controlSolenoid(6, control_data[1][1]);  
 
-      if (control_data[2][2] == 1) {  // Share
-          motor_control(6, 1000);  // M5
-      } else if(control_data[2][0] == 1) {
-          motor_control(6, -1000);  // M5
+      if (control_data[2][0] == 1) {  // Share
+          motor_control(6, 800);  // M5
+      } else if(control_data[2][2] == 1) {
+          motor_control(6, -800);  // M5
       } else {
           motor_control(6, 0);  // M5
       }
 
       if (control_data[1][2] == 1) {  // Triangle
-          motor_control(5, 1000);  // M6
+          motor_control(5, 400);  // M6
       } else if(control_data[1][0] == 1) {
-          motor_control(5, -1000);  // M6
+          motor_control(5, -400);  // M6
       } else {
           motor_control(5, 0);  // M6
       }
@@ -254,7 +253,7 @@ int main(void)
 
 /**
   * @brief System Clock Configuration
-  * @retval None 
+  * @retval None
   */
 void SystemClock_Config(void)
 {
@@ -787,11 +786,11 @@ static void MX_GPIO_Init(void)
                           |OP5_Pin|OP1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, OP3_Pin|BnoReset_Pin|OP8_Pin|OP7_Pin
-                          |M4InA_Pin|M4InB_Pin|M5InA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, BnoReset_Pin|OP8_Pin|OP7_Pin|M4InA_Pin
+                          |M4InB_Pin|M5InA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, OP4_Pin|OP2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, OP4_Pin|OP3_Pin|OP2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, M5InB_Pin|M6InA_Pin|M6InB_Pin, GPIO_PIN_RESET);
@@ -830,17 +829,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(Sen8_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : OP3_Pin BnoReset_Pin OP8_Pin OP7_Pin
-                           M4InA_Pin M4InB_Pin M5InA_Pin */
-  GPIO_InitStruct.Pin = OP3_Pin|BnoReset_Pin|OP8_Pin|OP7_Pin
-                          |M4InA_Pin|M4InB_Pin|M5InA_Pin;
+  /*Configure GPIO pins : BnoReset_Pin OP8_Pin OP7_Pin M4InA_Pin
+                           M4InB_Pin M5InA_Pin */
+  GPIO_InitStruct.Pin = BnoReset_Pin|OP8_Pin|OP7_Pin|M4InA_Pin
+                          |M4InB_Pin|M5InA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : OP4_Pin OP2_Pin */
-  GPIO_InitStruct.Pin = OP4_Pin|OP2_Pin;
+  /*Configure GPIO pins : OP4_Pin OP3_Pin OP2_Pin */
+  GPIO_InitStruct.Pin = OP4_Pin|OP3_Pin|OP2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -903,8 +902,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

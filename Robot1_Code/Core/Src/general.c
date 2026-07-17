@@ -120,7 +120,7 @@ void runner(void) {
 #define SOLENOID_COUNT    4   // control_data[3] дэх товчны тоо
 
 /* control_data[3][i] товч  →  соленоидын дугаар (бодит холболтын дагуу) */
-static const uint8_t SOLENOID_MAP[SOLENOID_COUNT] = { 1, 5, 2, 4 };
+static const uint8_t SOLENOID_MAP[SOLENOID_COUNT] = { 1, 3, 2, 4 };
 /*                                                    L1 R1 L2 R2 */
 
 typedef struct {

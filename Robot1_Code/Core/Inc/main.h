@@ -99,8 +99,6 @@ void Error_Handler(void);
 #define SCL_GPIO_Port GPIOB
 #define SDA_Pin GPIO_PIN_11
 #define SDA_GPIO_Port GPIOB
-#define OP3_Pin GPIO_PIN_10
-#define OP3_GPIO_Port GPIOD
 #define BnoReset_Pin GPIO_PIN_11
 #define BnoReset_GPIO_Port GPIOD
 #define M3Pwm_Pin GPIO_PIN_12
@@ -125,6 +123,8 @@ void Error_Handler(void);
 #define OP4_GPIO_Port GPIOA
 #define Brush2_Pin GPIO_PIN_10
 #define Brush2_GPIO_Port GPIOA
+#define OP3_Pin GPIO_PIN_11
+#define OP3_GPIO_Port GPIOA
 #define OP2_Pin GPIO_PIN_15
 #define OP2_GPIO_Port GPIOA
 #define OP1_Pin GPIO_PIN_11

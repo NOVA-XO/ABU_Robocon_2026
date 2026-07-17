@@ -58,6 +58,18 @@ void generalInit(void)
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); // brush direction
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4); // brush direction
     HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
+
+    /* OP3 = photoRes (PC3, хуучин ADC1_IN13) — СОЛЕНОИД 3-ын гаралт болгож дахин
+     * тохируулав. MX_ADC1_Init нь PC3-ыг analog болгосныг ЭНД дарж бичнэ (generalInit
+     * нь бүх MX_*_Init-ийн ДАРАА дуудагддаг). Read_PC3 цаашид ашиглагдахгүй. */
+    GPIO_InitTypeDef gpio_op3 = {0};
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    HAL_GPIO_WritePin(OP3_GPIO_Port, OP3_Pin, GPIO_PIN_RESET);   // эхлэлд OFF
+    gpio_op3.Pin   = OP3_Pin;
+    gpio_op3.Mode  = GPIO_MODE_OUTPUT_PP;
+    gpio_op3.Pull  = GPIO_NOPULL;
+    gpio_op3.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(OP3_GPIO_Port, &gpio_op3);
 }
 
 /* -----------------------------------------------------------------------------
