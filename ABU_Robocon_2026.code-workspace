@@ -1,10 +1,14 @@
 {
-  // ABU Robocon 2026 — хоёр роботыг зэрэг нээх multi-root workspace.
+  // ABU Robocon 2026 — бүх firmware төслийг зэрэг нээх multi-root workspace.
   // Нээх: File → Open Workspace from File… → энэ файлыг сонго
   //       (энэ чатыг хадгалахын тулд New Window дээр нээхийг зөвлөе).
+  //
+  // ⚠ Фолдер нэмэхэд ЭНД бичих ёстой — диск дээр шинэ фолдер үүсгэхэд
+  //   VS Code түүнийг автоматаар авахгүй.
   "folders": [
-    { "path": "Robot1_Code", "name": "Robot1 (manual)" },
-    { "path": "Robot2_Code", "name": "Robot2 (auto)" }
+    { "path": "Robot1_Code",      "name": "Robot1 (manual)" },
+    { "path": "Robot2_Code",      "name": "Robot2 (auto, PCB1)" },
+    { "path": "Robot2_PCB2_Code", "name": "Robot2 (auto, PCB2)" }
   ],
   "settings": {
     "stm32cube-ide-clangd.path": "cube",
