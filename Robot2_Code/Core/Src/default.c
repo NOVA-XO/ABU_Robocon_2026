@@ -8,10 +8,12 @@
  */
 #include "default.h"
 #include "test.h"
+#include "blue.h"       // weapon_blue
+#include "sequence.h"   // climb_1/2/3
 #include <stdlib.h>
 #include <stdio.h>
 #include "string.h"
-#include <stdbool.h> 
+#include <stdbool.h>
 #include "pca9685.h"
 
 /* ---- main.c дахь periphery handle-ууд ---------------------------------- */
@@ -113,6 +115,48 @@ void controlServo(bool isServo, int angle)
  *    control_data[4][0] = "дараах" товч, control_data[4][1] = "сонгох" товч
  * -----------------------------------------------------------------------------
  */
+/* -----------------------------------------------------------------------------
+ *  Горимын нэрс — тоо ба нэр ХАМТ энд. MODE_COUNT нь массиваас бодогдоно,
+ *  тиймээс горим нэмэхэд нэг л мөр засна (өмнө нь "if (mode == 14)" гэж
+ *  тоог гараар бичдэг байсан — жагсаалттай зөрөх эрсдэлтэй).
+ * -----------------------------------------------------------------------------
+ */
+static const char *const mode_name[] = {
+    "RUN blue",         //  0  автомат дараалал
+    "Joystick",         //  1
+    "Encoder",          //  2
+    "Sensor v1-v8",     //  3
+    "Motor",            //  4
+    "Solenoid",         //  5
+    "Servo",            //  6
+    "Rack preset",      //  7
+    "Rack climb",       //  8
+    "Drive straight",   //  9
+    "Turn 90 + all",    // 10
+    "Runner",           // 11
+    "Climb 1",          // 12
+    "Climb 2",          // 13
+    "Climb 3",          // 14
+    "Rack serial",      // 15  ⚠ UART4 — LPMS-тэй зөрчилдөнө
+};
+#define MODE_COUNT  ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
+
+/* Ракийн алдааг шалгаж, гарвал аюулгүй төлөвт (Robot_Error буцахгүй) */
+static void mode_check_rack(void)
+{
+    uint8_t f = Rack_Fault();
+    if (f) Robot_Error(f == 1 ? "RACK TIMEOUT" : "RACK SYNC");
+}
+
+/* -----------------------------------------------------------------------------
+ *  selectMode — OLED дээр горим сонгуулж, тухайн горимыг ажиллуулах
+ *    control_data[4][0] = "дараах" товч (Share),  control_data[4][1] = "сонгох" (Options)
+ *
+ *  ⚠ Горим бүр while(true) — БУЦАХГҮЙ. Сонгосны дараа зөвхөн reset.
+ *  ⚠ Дуудахаас ӨМНӨ main.c-д generalInit / Servo_Home / rack homing / LPMS_Init
+ *    хийгдсэн байх ёстой — gyro болон ракийн горимууд түүнээс хамаарна.
+ * -----------------------------------------------------------------------------
+ */
 void selectMode(void)
 {
     static bool flag = false;
@@ -121,11 +165,13 @@ void selectMode(void)
     /* ---- Горим гүйлгэх (сонгох товч дарагдтал) ---- */
     while (control_data[4][1] == 0) {
 
+        LPMS_Read();   // сонголтын үед ч DMA буферээ хоослох (хуучирсан өгөгдөл хурааахгүй)
+
         if (control_data[4][0] == 1) {
             if (flag) {
                 flag = false;
                 mode++;
-                if (mode == 14) mode = 0;
+                if (mode >= MODE_COUNT) mode = 0;
             }
         } else {
             flag = true;
@@ -133,104 +179,75 @@ void selectMode(void)
 
         colorFill(Black);
         setCursor(10, 10);
-        printStr("SELECT MODE: %d ", mode);
-
-        setCursor(10, 30);
-        if      (mode == 0)  printStr("Let's do it!");
-        else if (mode == 1)  printStr("Test joystick!");
-        else if (mode == 2)  printStr("Test encoder!");
-        else if (mode == 3)  printStr("Test relay!");
-        else if (mode == 4)  printStr("Test sensor!");
-        else if (mode == 5)  printStr("Deesh Doosh!");
-        else if (mode == 6)  printStr("Test opto!");
-        else if (mode == 7)  printStr("Test motor!");
-        else if (mode == 8)  printStr("Test servo!");
-        else if (mode == 9)  printStr("Test hand!");
-        else if (mode == 10) printStr("Test BLDC!");
-        else if (mode == 11) printStr("Config urgugch!");
-        else if (mode == 12) printStr("Test Serial");
-        else if (mode == 13) printStr("Test solinoed!");
+        printStr("MODE %d/%d", mode, MODE_COUNT - 1);
+        setCursor(10, 34);
+        printStr("%s", mode_name[mode]);
         setScreen();
     }
 
     colorFill(Black);
     setCursor(10, 10);
     printStr("THIS MODE: %d ", mode);
+    setCursor(10, 34);
+    printStr("%s", mode_name[mode]);
     setScreen();
 
-    /* ---- Сонгосон горимыг ажиллуулах ---- */
-    if (mode == 0) {
-        while (true) {
-            //mainCode();
-        }
-    }
-    else if (mode == 1) {
-        while (true) {
-            test_joyStick();
-        }
-    }
-    else if (mode == 2) {
-        while (true) {
-            showEncoderStatus();
-        }
-    }
-    else if (mode == 3) {
-        while (true) {
-            test_joyStick();
-            testOptocoupler();
-            //testRelay();
-        }
-    }
-    else if (mode == 4) {
-        while (true) {
-            test_sensor();
-        }
-    }
-    else if (mode == 5) {
-        while (true) {
-        }
-    }
-    else if (mode == 6) {
-        while (true) {
-            testOptocoupler();
-            test_motor();
-        }
-    }
-    else if (mode == 7) {
-        while (true) {
-            test_motor();
-            //test_BTS7960();
-        }
-    }
-    else if (mode == 8) {
-        while (true) {
-            testServo();
-        }
-    }
-    else if (mode == 9) {
-        while (true) {
-        }
-    }
-    else if (mode == 10) {
-    }
-    else if (mode == 11) {
-        while (true) {
-            //test_motor();
-            //showEncoderStatus();
-        }
-    }
-    else if (mode == 12) {
-        while (true) {
-            for (int i = 0; i < 1000; i++) {
-                send_uart_int(i);
-                send_uart("\n");
-            }
-        }
-    }
-    else if (mode == 13) {                 // ЗАСВАР: өмнө нь handler байхгүй байсан
-        while (true) {
-            testOptocoupler();             // соленоидуудыг control_data-аар шалгах
-        }
+    /* ---- Сонгосон горимыг ажиллуулах (бүгд БУЦАХГҮЙ) ---- */
+    switch (mode) {
+
+    case 0:                                  // автомат: цэнхэр тал
+        while (true) { weapon_blue(); }      // дотроо Rack_Fault шалгана
+
+    case 1:
+        while (true) { test_joyStick(); }
+
+    case 2:
+        while (true) { showEncoderStatus(); }
+
+    case 3:
+        while (true) { test_sensor(); }
+
+    case 4:
+        while (true) { test_motor(); }
+
+    case 5:
+        while (true) { testOptocoupler(); }
+
+    case 6:                                  // △ → серво 0° ↔ 180°
+        while (true) { Servo_Preset_Control(); }
+
+    case 7:                                  // L1/L2/R1/R2 → 0/900/1350/1950
+        while (true) { mode_check_rack(); Rack_Preset_Control(); }
+
+    case 8:                                  // L1/R1 → хоёул,  L2/R2 → тус тусад нь
+        while (true) { mode_check_rack(); Rack_Climb_Test(); }
+
+    case 9:                                  // D-Up сэлгэх, L1/R1 хурд
+        while (true) { Drive_Straight_Test(); }
+
+    case 10:                                 // жолоо + 90° эргэлт + рак + серво
+        while (true) { mode_check_rack(); Gyro_Turn_Test(); }
+
+    case 11:                                 // зөвхөн гарын жолоо
+        while (true) { LPMS_Read(); runner(); }
+
+    case 12:
+        while (true) { mode_check_rack(); climb_1_function(); }
+
+    case 13:
+        while (true) { mode_check_rack(); climb_2_function(); }
+
+    case 14:
+        while (true) { mode_check_rack(); climb_3_function(); }
+
+    case 15:
+        /* ⚠ UART4-ийг LPMS эзэлсэн. Энэ горимыг ашиглах бол main.c-д
+           LPMS_Init()-ийг тайлбар болгож унтраах ёстой — эс тэгвээс хоёр
+           протокол нэг шугам дээр холилдож хоёул ажиллахгүй.            */
+        while (true) { Rack_Telemetry_Serial(); }
+
+    default:
+        while (true) { }
     }
 }
 

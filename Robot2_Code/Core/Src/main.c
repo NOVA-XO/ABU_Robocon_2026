@@ -59,6 +59,7 @@ TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim13;
 
 UART_HandleTypeDef huart4;
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_uart4_tx;
 
@@ -79,6 +80,7 @@ static void MX_TIM4_Init(void);
 static void MX_TIM7_Init(void);
 static void MX_TIM13_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 int control_data[5][4]={0};
@@ -188,7 +190,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-   HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -214,8 +216,13 @@ int main(void)
   MX_TIM13_Init();
   MX_ADC1_Init();
   MX_USB_DEVICE_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   generalInit();
+
+  /* Серво эхлэлийн байрлал (180°). generalInit нь PWM сувгийг асаадаг ч
+     өнцөг бичдэггүй — энэгүйгээр серво асахдаа хаана байснаа тэндээ үлдэнэ. */
+  Servo_Home();
 
   /* ===== RACK HOMING — encoder-ийн 0 цэгийг доод limit switch дээр тогтоох =====
    *  Тохируулга ХЭМЖИГДСЭН (Rack_Joystick_Test):
@@ -238,29 +245,26 @@ int main(void)
       while (1) { }          // байрлал тодорхойгүй — rack-ийг БҮҮ хөдөлгө
   }  
 
-  /* LPMS/Gyro/red-blue дараалал энэ горимд хэрэггүй (rack тохируулгын шат) */
-  /*
+  /* ===== LPMS GYRO ТЕСТ =====
+   *  UART4 дээр LPMS-ийг асааж, урсгалыг цэвэрлээд, yaw-ийн 0 цэгийг тогтооно.
+   *  ⚠ Rack_Telemetry_Serial МӨН UART4 тул энэ тестийн үед ТҮҮНИЙГ БҮҮ ДУУД. */
   LPMS_Init();
-  for (int i = 0; i < 50; i++) { LPMS_Read(); }
-  Gyro_ZeroYaw();
-  Red_Reset();
-  */
+  for (int i = 0; i < 50; i++) { LPMS_Read(); }   // stream-ийг цэвэрлэх (эхний хог)
+  Gyro_ZeroYaw();                                 // одоогийн чиглэлийг 0 болгох
+
+  /* ===== ГОРИМ СОНГОХ =====
+   *  Share = дараах горим,  Options = сонгох.  БУЦАХГҮЙ — сонгосон горим
+   *  өөрийн while(true)-д үлдэнэ. Мөн энэ нь эхлүүлэх хамгаалалт болно:
+   *  robot тэжээл өгмөгц дүүлэхгүй, товч дартал хүлээнэ.                    */
+  selectMode();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  // ===== RACK PRESET: товч дармагц ХОЁУЛАА тэр түвшин рүү шууд очно =====
-  //   L1 → 0 (доод/home)   L2 → 900   R1 → 1350   R2 → 1800 (дээд)
-  //
-  //   OLED:  TARGET:<зорилт> / B at:<back> / F at:<front>
-  //   Байрлалыг TIM7 ISR доторх Rack_Service тасралтгүй барина.
-  while (1) {
-      Rack_Preset_Control();
-      Servo_Preset_Control();    // Cross/Square/Triangle/Circle → серво өнцөг
-      Rack_Telemetry_Serial();   // тааруулгын TSV → UART4 (115200)
-      runner();
-  }
+  /* selectMode() БУЦАХГҮЙ — горим бүр өөрийн while(true)-д үлддэг.
+     Энд хүрэх нь зөвхөн ямар нэг зүйл буруудсан гэсэн үг.               */
+  while (1) { }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -269,7 +273,7 @@ int main(void)
 
 /**
   * @brief System Clock Configuration
-  * @retval None 
+  * @retval None
   */
 void SystemClock_Config(void)
 {
@@ -723,6 +727,39 @@ static void MX_UART4_Init(void)
   /* USER CODE BEGIN UART4_Init 2 */
 
   /* USER CODE END UART4_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 

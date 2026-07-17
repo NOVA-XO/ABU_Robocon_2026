@@ -89,6 +89,62 @@ void Gyro_ZeroYaw(void) {
 
 
 // =============================================================
+//  UART4 RX — DMA CIRCULAR + ring buffer
+//
+//  ЯАГААД: LPMS 70 Hz-ээр 27 байтын packet илгээнэ → байт бүр ~87µs тутам.
+//  UART-д ердөө 1 БАЙТЫН регистр байдаг тул полингоор уншихад гогцоо 87µs-ээс
+//  удаан блоклох бүрд (ж: OLED_Display ~25мс) байт АЛДАГДАЖ packet бүрддэггүй.
+//  DMA нь байт бүрийг ТОНОГ ТӨХӨӨРӨМЖИЙН түвшинд буферт бичих тул гогцооны
+//  хурднаас ҮЛ ХАМААРАН юу ч алдагдахгүй.
+//
+//  256 байт ≈ 135мс-ийн өгөгдөл (70Hz × 27B = 1890 B/s) — тайван нөөц.
+//  DMA1 Stream2 Channel4 = UART4_RX (STM32F407). Stream4 = UART4_TX (аль хэдийн).
+// =============================================================
+#define LPMS_RX_BUF  256
+static uint8_t  lpms_rx_buf[LPMS_RX_BUF];
+static uint16_t lpms_rd = 0;     // унших байрлал (DMA-ийн бичих байрлалыг NDTR-ээс авна)
+DMA_HandleTypeDef hdma_uart4_rx;
+
+static void LPMS_DMA_Start(void) {
+    __HAL_RCC_DMA1_CLK_ENABLE();
+
+    hdma_uart4_rx.Instance                 = DMA1_Stream2;
+    hdma_uart4_rx.Init.Channel             = DMA_CHANNEL_4;      // UART4_RX
+    hdma_uart4_rx.Init.Direction           = DMA_PERIPH_TO_MEMORY;
+    hdma_uart4_rx.Init.PeriphInc           = DMA_PINC_DISABLE;
+    hdma_uart4_rx.Init.MemInc              = DMA_MINC_ENABLE;
+    hdma_uart4_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_uart4_rx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+    hdma_uart4_rx.Init.Mode                = DMA_CIRCULAR;       // тасралтгүй эргэнэ
+    hdma_uart4_rx.Init.Priority            = DMA_PRIORITY_HIGH;
+    hdma_uart4_rx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    HAL_DMA_Init(&hdma_uart4_rx);
+
+    __HAL_LINKDMA(&huart4, hdmarx, hdma_uart4_rx);
+
+    HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
+
+    lpms_rd = 0;
+    HAL_UART_Receive_DMA(&huart4, lpms_rx_buf, LPMS_RX_BUF);
+}
+
+/* DMA1 Stream2 тасалдал — HAL-ийн төлөвийг хөтлөхөд шаардлагатай */
+void DMA1_Stream2_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&hdma_uart4_rx);
+}
+
+/* Ring buffer-ээс НЭГ байт авах. return: 1 = байт байсан, 0 = хоосон (non-blocking) */
+static uint8_t lpms_get(uint8_t *b) {
+    uint16_t wr = (uint16_t)(LPMS_RX_BUF - __HAL_DMA_GET_COUNTER(&hdma_uart4_rx));
+    if (wr == lpms_rd) return 0;                       // хоосон
+    *b = lpms_rx_buf[lpms_rd];
+    lpms_rd = (uint16_t)((lpms_rd + 1) % LPMS_RX_BUF);
+    return 1;
+}
+
+
+// =============================================================
 //  LPMS-ийг тохируулж stream горимд оруулах
 // =============================================================
 void LPMS_Init(void) {
@@ -105,6 +161,10 @@ void LPMS_Init(void) {
     HAL_UART_Transmit(&huart4, Packet_Stream, sizeof(Packet_Stream), 100);
 
     while (HAL_UART_Receive(&huart4, &dummy, 1, 5) == HAL_OK) { }
+
+    // ЭНЭ ЦЭГЭЭС хойш RX-ийг DMA хийнэ — байт алдагдахгүй.
+    // (Дээрх полинг уншилтууд DMA асахаас ӨМНӨ дуусах ёстой.)
+    LPMS_DMA_Start();
 
     yaw_rel = 0.0f;
 
@@ -124,15 +184,15 @@ void LPMS_Init(void) {
 //  Packet-ийн Euler хэсэг:
 //      [17..22]  Euler X, Y, Z (3 × int16, * 100)
 // =============================================================
-uint8_t LPMS_Read(void) {
+/* -----------------------------------------------------------------------------
+ *  lpms_feed — НЭГ байтыг frame-ийн state machine-д оруулах
+ *    return: 1 = БҮРЭН packet задлагдаж roll/pitch/yaw шинэчлэгдэв
+ * -----------------------------------------------------------------------------
+ */
+static uint8_t lpms_feed(uint8_t rx_byte) {
     static uint8_t rx_buf[50];
     static uint8_t rx_idx = 0;
     static uint8_t ready  = 0;
-    uint8_t rx_byte;
-
-    if (HAL_UART_Receive(&huart4, &rx_byte, 1, 10) != HAL_OK) {
-        return 0;
-    }
 
     // START байт хүлээх
     if (!ready) {
@@ -199,6 +259,25 @@ uint8_t LPMS_Read(void) {
     }
 
     return 0;
+}
+
+/* -----------------------------------------------------------------------------
+ *  LPMS_Read — DMA буферт хуримтлагдсан БҮХ байтыг залгиж, packet задална
+ *    return: 1 = энэ дуудалтад дор хаяж НЭГ packet шинэчлэгдэв, 0 = үгүй
+ *
+ *  Блоклохгүй. Нэг дуудалт = буфер бүрэн цэвэрлэгдэнэ. Тиймээс гогцоо удаан
+ *  (ж: OLED 25мс) байсан ч байт алдагдахгүй — DMA буферлэсээр байна.
+ *  Гогцоо 135мс-ээс удаан бол л буфер дүүрч эргэнэ (256 байт нөөц).
+ * -----------------------------------------------------------------------------
+ */
+uint8_t LPMS_Read(void) {
+    uint8_t got = 0;
+    uint8_t b;
+
+    while (lpms_get(&b)) {          // буфер хоосортол залгина
+        if (lpms_feed(b)) got = 1;
+    }
+    return got;
 }
 
 

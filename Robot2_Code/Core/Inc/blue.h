@@ -12,6 +12,7 @@
 
 #include "general.h"   // main.h, ssd1306.h, default.h, lpms.h-г дамжуулж авчирна
 
-void weapon_blue(void);   // цэнхэр талбарын дараалал (state machine)
+uint8_t weapon_blue(void);        // цэнхэр талбарын дараалал — дуусвал 1
+void    weapon_blue_reset(void);  // эхнээс нь дахин ажиллуулах
 
 #endif /* INC_BLUE_H_ */

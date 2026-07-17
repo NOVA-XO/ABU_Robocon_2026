@@ -31,4 +31,12 @@ void    up_40_reset(void);
 uint8_t down_40_function(void);
 void    down_40_reset(void);
 
+/* ---- CLIMB: зам (уул) бүрийн бүтэн дэс дараалал (блокуудыг гинжилнэ) ------ */
+uint8_t climb_1_function(void);   // ЗАМ 1: up_40 ×1 → down_20 ×1 → up_20 ×1 → down_20 ×2
+void    climb_1_reset(void);
+uint8_t climb_2_function(void);   // ЗАМ 2: up_20 ×3 → down_20 ×1 → down_40 ×1
+void    climb_2_reset(void);
+uint8_t climb_3_function(void);   // ЗАМ 3: up_40 ×1 → up_20 ×1 → down_20 ×3
+void    climb_3_reset(void);
+
 #endif /* INC_SEQUENCE_H_ */
