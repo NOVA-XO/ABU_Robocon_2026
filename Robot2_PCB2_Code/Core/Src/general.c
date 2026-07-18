@@ -22,6 +22,7 @@ extern TIM_HandleTypeDef htim13;
 
 extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart3;
+extern UART_HandleTypeDef huart2;   // PA2/PA3 — 1-р PCB-тэй холбоо
 
 extern ADC_HandleTypeDef hadc1;
 
@@ -32,6 +33,11 @@ extern int timer;                 // TIM7-оос нэмэгддэг зөөлөн
 
 extern uint8_t usb_received_value;
 extern uint8_t usb_new_data_flag;
+
+/* ---- USART2 холбоо (main.c-д тодорхойлогдсон, RX ISR бичнэ) ------------- */
+extern volatile uint32_t link_byte_n;   // ирсэн байт
+extern volatile uint32_t link_pkt;      // бүрэн задарсан багц
+extern volatile uint32_t link_ms;       // сүүлийн багцын агшин
 
 /* ---- Серво: одоогийн өнцөг (Servo_Preset_Control бичнэ, OLED уншина) ------
  *  SERVO_DEG_MAX нь general.h-д (Servo_SetDeg-ийн дуудагчид хэрэгтэй).       */
@@ -388,4 +394,145 @@ void USB_Show_OLED(void)
     }
 
     setScreen();
+}
+
+
+/* =============================================================================
+ *  Link_Recv_Test — 1-р PCB-ээс ирэх PS5 удирдлагыг шалгах (USART2, PA3 = RX)
+ *
+ *  PS5 нэг ширхэг, PCB1-д залгаастай. PCB1 нь ESP32-оос ирсэн 23 байтыг яг тэр
+ *  хэвээр дамжуулж, энд ps5_feed() задлаад control_data[5][4]-г дүүргэнэ.
+ *  Тиймээс энэ самбарын БҮХ код (runner, серво, соленоид) ӨӨРЧЛӨЛТГҮЙ ажиллана.
+ *
+ *  Утас: PCB1 PA2 (TX) → PCB2 PA3 (RX),  БАС GND ↔ GND (заавал).
+ *
+ *  Уншиж дүгнэх — b (байт) ба p (багц) хоёрыг ЗААВАЛ хамт харна:
+ *    b өсөж, p өсөж    → бүх зүйл зөв
+ *    b өсөж, p ЗОГССОН → байт ирж байгаа ч багц бүрдэхгүй: baud зөрөх юм уу
+ *                        байт алдагдаж байна (framing хэзээ ч бүтэхгүй)
+ *    b ч өсөхгүй       → утас/чиглэл буруу, GND алга, эсвэл PCB1 асаагүй
+ *    STALE             → өмнө ирж байсан, одоо тасарсан
+ * =============================================================================
+ */
+void Link_Recv_Test(void) {
+    static uint32_t t = 0;
+    if (HAL_GetTick() - t < 100) return;
+    t = HAL_GetTick();
+
+    /* volatile-ыг НЭГ л удаа уншина — ISR дунд нь өөрчилвөл дэлгэц зөрнө */
+    uint32_t b   = link_byte_n;
+    uint32_t p   = link_pkt;
+    uint32_t age = HAL_GetTick() - link_ms;
+
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("LINK RX");
+    setCursor(2, 18);
+    printStr("b:%lu p:%lu", (unsigned long)b, (unsigned long)p);
+    setCursor(2, 34);
+    printStr("LX:%d LY:%d", control_data[0][0], control_data[0][1]);
+    setCursor(2, 50);
+    if      (p == 0 && b == 0) printStr("NO DATA");
+    else if (p == 0)           printStr("BYTES, NO PKT");
+    else if (age > 500)        printStr("STALE %lums", (unsigned long)age);
+    else                       printStr("OK");
+    setScreen();
+}
+
+
+/* =============================================================================
+ *  PCB2_Manual — 2 дахь PCB-ийн ҮНДСЭН ГАРЫН УДИРДЛАГА
+ *
+ *  Энэ самбар ӨӨРИЙН PS5-тай (ESP32 → USART3). Нэг гарын товч хүрэлцэхгүй
+ *  болсон тул хоёр робот ТУСДАА удирдагдана — PCB1-ээс USART2-оор ирэх
+ *  урсгалыг энд ХЭРЭГЛЭХГҮЙ (main.c-ийн тайлбарыг үз).
+ *
+ *  МОТОР (дарж байхад эргэнэ, тавихад зогсоно):
+ *    L1 / L2       → мотор 6,  500 PWM   (L1 = +, L2 = −)
+ *    R1 / R2       → мотор 4,  500 PWM   (R1 = +, R2 = −)
+ *    D-Up / D-Down → мотор 5, 1000 PWM   (D-Up = +, D-Down = −)
+ *
+ *  СОЛЕНОИД (нэг даралт = toggle, debounce):
+ *    ✕ → 1    ▭ → 2    △ → 3    ○ → 4    D-Left → 5    D-Right → 6
+ *
+ *  ⚠ Чиглэл буруу бол доорх #define-ийн тэмдгийг сольж болно, эсвэл товчны
+ *    хосыг соль (ж: L1/L2-г солих). Мотор эргэх чиглэлийг би мэдэхгүй.
+ * =============================================================================
+ */
+#define PCB2_M6_PWM   500   // L1 / L2
+#define PCB2_M4_PWM   500   // R1 / R2
+#define PCB2_M5_PWM  1000   // D-Up / D-Down
+
+/* -----------------------------------------------------------------------------
+ *  hold_axis — хоёр товчийг нэг тэнхлэг болгох (дарж байхад эргэнэ)
+ *    Хоёуланг нь ЗЭРЭГ дарвал 0 — эс тэгвээс аль нэг нь "хожиж" гэнэт хөдөлнө.
+ *    Debounce хэрэггүй: түүхий хэлбэлзэл нэг л loop-д мотор бага зэрэг цохилно.
+ * -----------------------------------------------------------------------------
+ */
+static int hold_axis(uint8_t pos, uint8_t neg, int pwm) {
+    if (pos && !neg) return  pwm;
+    if (neg && !pos) return -pwm;
+    return 0;
+}
+
+void PCB2_Manual(void) {
+    static Btn_t   bs[6]   = {0};
+    static bool    st[6]   = {false};
+    static uint8_t inited  = 0;
+
+    if (!inited) {                       // программын төлөвтэй нийцүүлнэ
+        for (int i = 0; i < 6; i++) controlSolenoid(i + 1, false);
+        inited = 1;
+    }
+
+    /* --- Мотор: hold --- */
+    /*   control_data[3]: [0]=L1 [1]=R1 [2]=L2 [3]=R2
+     *   control_data[2]: [0]=D-Down [1]=D-Right [2]=D-Up [3]=D-Left      */
+    motor_control(6, hold_axis((uint8_t)control_data[3][0],
+                               (uint8_t)control_data[3][2], PCB2_M6_PWM));  // L1 / L2
+    motor_control(4, hold_axis((uint8_t)control_data[3][1],
+                               (uint8_t)control_data[3][3], PCB2_M4_PWM));  // R1 / R2
+    motor_control(5, hold_axis((uint8_t)control_data[2][2],
+                               (uint8_t)control_data[2][0], PCB2_M5_PWM));  // D-Up / D-Down
+
+    /* --- Соленоид 1..4: ✕ ▭ △ ○  (control_data[1][0..3] ижил дараалалтай) --- */
+    for (int i = 0; i < 4; i++) {
+        if (btn_rising(&bs[i], (uint8_t)control_data[1][i])) {
+            st[i] = !st[i];
+            controlSolenoid(i + 1, st[i]);
+        }
+    }
+    /* --- Соленоид 5, 6: D-Left / D-Right --- */
+    if (btn_rising(&bs[4], (uint8_t)control_data[2][3])) {   // D-Left
+        st[4] = !st[4];
+        controlSolenoid(5, st[4]);
+    }
+    if (btn_rising(&bs[5], (uint8_t)control_data[2][1])) {   // D-Right
+        st[5] = !st[5];
+        controlSolenoid(6, st[5]);
+    }
+
+    /* --- OLED (100мс тутам) --- */
+    static uint32_t t = 0;
+    if (HAL_GetTick() - t >= 100) {
+        t = HAL_GetTick();
+
+        char sol[7];                       // соленоидын төлөв: "123..6" / "-"
+        for (int i = 0; i < 6; i++) sol[i] = st[i] ? ('1' + i) : '-';
+        sol[6] = '\0';
+
+        colorFill(Black);
+        setCursor(2, 2);
+        printStr("PCB2 MANUAL");
+        setCursor(2, 18);
+        printStr("M6:%d M4:%d",
+                 hold_axis((uint8_t)control_data[3][0], (uint8_t)control_data[3][2], PCB2_M6_PWM),
+                 hold_axis((uint8_t)control_data[3][1], (uint8_t)control_data[3][3], PCB2_M4_PWM));
+        setCursor(2, 34);
+        printStr("M5:%d",
+                 hold_axis((uint8_t)control_data[2][2], (uint8_t)control_data[2][0], PCB2_M5_PWM));
+        setCursor(2, 50);
+        printStr("SOL:%s", sol);
+        setScreen();
+    }
 }

@@ -88,6 +88,12 @@ uint8_t information[23];  // шинэ урт
 uint8_t rx_idx = 0;
 uint8_t data;
 
+/* ---- USART2: 1-р PCB-ээс ирэх PS5 багц (PA3 = RX) ----------------------- */
+uint8_t           link_byte   = 0;   // HAL-ийн RX буфер (1 байт)
+volatile uint32_t link_byte_n = 0;   // нийт ирсэн байт (утас/baud шалгах)
+volatile uint32_t link_pkt    = 0;   // бүрэн задарсан багц (framing шалгах)
+volatile uint32_t link_ms     = 0;   // сүүлийн БАГЦ ирсэн агшин (хуучирсныг мэдэх)
+
 /* -----------------------------------------------------------------------------
  *  HAL_UART_RxCpltCallback — ESP32-оос ирсэн PS5 багцыг задлах (huart3, 1 байт/удаа)
  *
@@ -107,53 +113,82 @@ uint8_t data;
  *  Холбогдоогүй (флаг = 0) бол бүх утгыг 0 болгож цэвэрлэнэ.
  * -----------------------------------------------------------------------------
  */
+/* -----------------------------------------------------------------------------
+ *  ps5_feed — Нэг байтыг PS5 багц задлагчид оруулах (framing state machine)
+ *
+ *  USART2 (1-р PCB-ээс) ба USART3 (ESP32) хоёуланд НИЙТЛЭГ. Энэ самбарт PS5-ийн
+ *  донгл БАЙХГҮЙ — өгөгдөл нь 1-р PCB-ээс дамжиж ирнэ. PCB1 нь ESP32-оос ирсэн
+ *  23 байтыг ЯГ ТЭР ХЭВЭЭР нь дамжуулдаг тул задлагч НЭГ Л ХУВИЛБАР байна —
+ *  хоёр газар тусад нь бичвэл хожим формат зөрөх эрсдэлтэй.
+ * -----------------------------------------------------------------------------
+ */
+static void ps5_feed(uint8_t b)
+{
+  if (rx_idx == 0 && b != 0xAA) return;   // START хүлээж байна
+
+  information[rx_idx++] = b;
+
+  if (rx_idx == 23 && information[22] == 0x0A)
+  {
+    uint8_t isConnected = information[21];
+
+    if (isConnected == 1) {
+      // --- Джойстик: information[1..4] → control_data[0][0..3], төв 100-г хасаж -100..100 ---
+      //   [0][0]=LStickX  [0][1]=LStickY  [0][2]=RStickX  [0][3]=RStickY
+      for (int i = 0; i < 4; i++) {
+        control_data[0][i] = information[1 + i] - 100;
+      }
+
+      // --- Товч: information[5..20] → control_data[1..4][0..3] (0/1) ---
+      //   мөр 1 = Cross/Square/Triangle/Circle
+      //   мөр 2 = D-pad Down/Right/Up/Left
+      //   мөр 3 = L1/R1/L2/R2
+      //   мөр 4 = Share/Options/L3/R3
+      for (int i = 0; i < 16; i++) {
+        control_data[1 + (i / 4)][i % 4] = information[5 + i];
+      }
+
+    } else {
+      // --- Холбогдоогүй: бүх джойстик/товчийг тэглэх ---
+      for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 4; j++) {
+          control_data[i][j] = 0;
+        }
+      }
+    }
+
+    link_pkt++;                 // бүрэн багц (Link_Recv_Test харуулна)
+    link_ms = HAL_GetTick();
+    rx_idx  = 0;
+  }
+  else if (rx_idx >= 23) {
+    rx_idx = 0;                 // урт таарсан ч END байт буруу → хаяна
+  }
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart == &huart3)
   {
-    if (rx_idx == 0 && data != 0xAA) {
-      HAL_UART_Receive_IT(&huart3, &data, 1);
-      return;
-    }
-
-    information[rx_idx++] = data;
-
-    if (rx_idx == 23 && information[22] == 0x0A)
-    {
-      uint8_t isConnected = information[21];
-
-      if (isConnected == 1) {
-        // --- Джойстик: information[1..4] → control_data[0][0..3], төв 100-г хасаж -100..100 ---
-        //   [0][0]=LStickX  [0][1]=LStickY  [0][2]=RStickX  [0][3]=RStickY
-        for (int i = 0; i < 4; i++) {
-          control_data[0][i] = information[1 + i] - 100;
-        }
-
-        // --- Товч: information[5..20] → control_data[1..4][0..3] (0/1) ---
-        //   мөр 1 = Cross/Square/Triangle/Circle
-        //   мөр 2 = D-pad Down/Right/Up/Left
-        //   мөр 3 = L1/R1/L2/R2
-        //   мөр 4 = Share/Options/L3/R3
-        for (int i = 0; i < 16; i++) {
-          control_data[1 + (i / 4)][i % 4] = information[5 + i];
-        }
-
-      } else {
-        // --- Холбогдоогүй: бүх джойстик/товчийг тэглэх ---
-        for (int i = 0; i < 5; i++) {
-          for (int j = 0; j < 4; j++) {
-            control_data[i][j] = 0;
-          }
-        }
-      }
-
-      rx_idx = 0;
-    }
-    else if (rx_idx >= 23) {
-    	rx_idx = 0;  // invalid
-    }
-
+    /* --- ЭНЭ САМБАРЫН ӨӨРИЙН PS5 (ESP32 → USART3) — ҮНДСЭН ЭХ СУРВАЛЖ --- */
+    ps5_feed(data);
     HAL_UART_Receive_IT(&huart3, &data, 1);
+  }
+  else if (huart == &huart2)
+  {
+    /* --- 1-р PCB-ээс ирэх урсгал (USART2, PA3) ---
+     *  ⚠ ps5_feed рүү ОРУУЛАХГҮЙ. Энэ самбар одоо ӨӨРИЙН PS5-тай болсон тул
+     *    хоёр эх сурвалж control_data-г зэрэг бичвэл хоорондоо зөрөлдөж, аль
+     *    нь сүүлд ирснээс хамаарч удирдлага "чичирнэ". Нэг л эзэн байх ёстой.
+     *
+     *  Байтыг зөвхөн ТООЛНО — Link_Recv_Test-ийн оношилгоо ажилласаар байна.
+     *  PCB1 нь дамжуулсаар байгаа (хожим самбар хоорондын тушаалд хэрэг болно);
+     *  энд түүнийг зүгээр л хэрэглэхгүй.
+     *
+     *  Receive_IT-ийг ДАХИН зэвсэглэхгүй бол ганц байт аваад чимээгүй болно.  */
+    link_byte_n++;
+    link_ms = HAL_GetTick();
+    HAL_UART_Receive_IT(&huart2, &link_byte, 1);
   }
 }
 
@@ -218,6 +253,10 @@ int main(void)
   /* Серво эхлэлийн байрлал (180°). generalInit нь PWM сувгийг асаадаг ч
      өнцөг бичдэггүй — энэгүйгээр серво асахдаа хаана байснаа тэндээ үлдэнэ. */
   Servo_Home();
+
+  /* USART2 (PA3) — 1-р PCB-ээс өгөгдөл хүлээж эхлэх. generalInit нь зөвхөн
+     huart3-ыг (PS5/ESP32) зэвсэглэдэг тул үүнийг энд тусад нь хийнэ.      */
+  HAL_UART_Receive_IT(&huart2, &link_byte, 1);
 
   /* ===== ГОРИМ СОНГОХ =====
    *  Share = дараах горим,  Options = сонгох.  БУЦАХГҮЙ — сонгосон горим

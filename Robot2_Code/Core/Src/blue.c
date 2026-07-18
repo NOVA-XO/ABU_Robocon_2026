@@ -12,45 +12,78 @@ extern int counter[4];              // encoder тоолуурууд
 extern ADC_HandleTypeDef hadc1;
 
 /* ---- Тохиргоо ------------------------------------------------------------ */
-#define WB_DRIVE_PWM   (-400)   // урагш = СӨРӨГ (жолооны конвенц)
-#define WB_RACK_UP      1950    // ракийн дээд байрлал (= pos_max)
-#define WB_SERVO_DEG       0    // рак өргөгдсөний дараах сервоны өнцөг
-#define WB_STRAFE_PWM    250    // хажуу тийш хурд
-#define WB_STRAFE_MS     500    // хажуу тийш хугацаа
+#define WB_DRIVE_PWM   (-400)   // хурдан урагш = СӨРӨГ (жолооны конвенц)
+#define WB_DRIVE_SLOW  (-100)   // намуухан урагш (val8 руу дөхөх — хэт хурдан байв)
+#define WB_RACK_UP      1900    // ракийн дээд байрлал. pos_max(1950)-аас ДООШ:
+                                //   1950-д барихад хүрч чадалгүй RACK TIMEOUT болдог.
+#define WB_SERVO_DOWN      0    // рак өргөгдсөний дараах сервоны өнцөг (буулгах)
+#define WB_SERVO_UP      180    // серво буцаах өнцөг
+#define WB_SERVO_MS      500    // серво буух хугацаа (хүлээнэ)
+#define WB_VAL8_HOLD_MS  200    // val8 ийм хугацаанд ТАСРАЛТГҮЙ 0 байвал "шахагдсан"
+#define WB_VAL3_WAIT_MS 1000    // val3 мэдэрсний дараа хүлээх хугацаа (1 секунд)
+#define WB_END_DRIVE_MS  500    // эцсийн ухрах хугацаа (500мс)
+#define WB_END_PWM      (+400)   // эцсийн явалт: УХРАХ (урагш=сөрөг тул эерэг=ухрах)
+#define WB_SOLENOID        1    // val3==0 үед асаах соленоид
+#define WB_RACK_FULL    1950    // ухрах+эргэх үед хоёр ракийг ДҮҮРЭН дээш (pos_max)
+#define WB_TURN_DEG    180.0f   // эцэст эргэх өнцөг
 
-/*  ⚠ WB_STRAFE_SIGN — Vx-ийн тэмдэг: ЗҮҮН = сөрөг.
- *    Гарал үүсэл: runner-д цэвэр эргэлтэд (Vx=0,Vy=0) W>0 нь мотор1 сөрөг /
- *    мотор2 эерэг өгдөг — энэ нь Gyro_TurnAngle-ийн ЗҮҮН эргэлтийн ЭСРЭГ тал.
- *    ⇒ W>0 = баруун ⇒ стик баруун = эерэг ⇒ Vx>0 = баруун хажуулалт.
- *    Энэ бол хэмжилт биш ЛОГИК дүгнэлт — робот БАРУУН тийш явбал +1 болго.  */
-#define WB_STRAFE_SIGN   (-1)
+/* ---- val3 align (val3==1 бол зүүн тийш зэрэгцүүлэх) ---------------------- */
+#define WB_ALIGN_STRAFE  250    // зүүн тийш хажуулах хурд
+#define WB_ALIGN_FRONT    50    // УРД хоёр дугуй (1,2)-ийн хажуулах суурь нэмэлт PWM
+#define WB_ALIGN_FWD    (-120)  // урагш bias — val8-ыг шахсаар байлгах (сөрөг=урагш)
+#define WB_ALIGN_KP      8.0f   // gyro чиг барих коэффициент (Drive_Straight-тэй ижил маяг)
+#define WB_ALIGN_WMAX    150    // gyro залруулгын дээд PWM
 
 /* ---- Төлөвүүд ------------------------------------------------------------ */
 typedef enum {
     WB_S0_DRIVE = 0,    // val5 == 0 болтол gyro-гоор шулуун урагш
-    WB_S1_RACK_UP,      // хоёр рак ХАМТ 1950 руу
-    WB_S2_SERVO_STRAFE, // серво 0° + ЗЭРЭГ зүүн тийш 500мс
-    WB_S3_DRIVE2,       // val8 == 0 болтол дахин шулуун урагш
+    WB_S1_RACK_UP,      // хоёр рак ХАМТ 1900 руу
+    WB_S3_PUSH_VAL8,    // намуухан урагш + серво ЗЭРЭГ буулгах, val8 ТАСРАЛТГҮЙ 0 болтол
+    WB_S4_ALIGN_VAL3,   // val3==1 бол зүүн тийш (gyro+val8), val3==0 бол → 1сек хүлээх
+    WB_S4B_WAIT,        // val3 мэдэрсэн → 1 сек хүлээгээд → соленоид1 + серво 180
+    WB_S5_END_DRIVE,    // 500мс УХРАХ + ракуудыг 1950 руу
+    WB_S6_TURN,         // 180° эргэх (ракууд 1950-д)
     WB_DONE
 } wb_state_t;
 
 static wb_state_t wb_st       = WB_S0_DRIVE;
 static uint8_t    wb_anchored = 0;
-static uint8_t    wb_s2_init  = 0;
-static uint32_t   wb_s2_t0    = 0;
+static uint8_t    wb_srv_init = 0;   // S3-д сервог нэг л удаа буулгах
+static uint32_t   wb_wait_t0  = 0;   // val3-ийн дараах 1сек хүлээлтийн эхлэл
+static uint32_t   wb_v8_t0    = 0;   // val8 тасралтгүй 0 болсон эхлэлийн агшин
+static uint32_t   wb_end_t0   = 0;   // эцсийн ухрах явалтын эхлэл
+static uint8_t    wb_s5_init  = 0;   // S5-д ракуудыг 1950 руу нэг л удаа командлах
+static uint8_t    wb_s6_init  = 0;   // S6-д эргэлтийг нэг л удаа reset хийх
 
 /* -----------------------------------------------------------------------------
- *  wb_strafe — ХАЖУУ тийш (mecanum).  runner-ийн inverse kinematics-ээс
- *  Vy = 0, W = 0 тавьсан тохиолдол:  fl=-Vx  fr=+Vx  rl=+Vx  rr=-Vx
- *    vx < 0 → зүүн,  vx > 0 → баруун
+ *  wb_move — ХАЖУУ + УРАГШ + gyro ЧИГ БАРИХ (mecanum, closed-loop чиг)
+ *
+ *    vx  : хажуу.  vx < 0 → ЗҮҮН,  vx > 0 → баруун  (wb_strafe-ийн конвенц)
+ *    fwd : урагш bias.  сөрөг = урагш (Drive_Straight-ийн конвенц)
+ *
+ *  gyro залруулга (c): Drive_Straight-тэй ИЖИЛ маяг — зүүн мотор(1,3) −c,
+ *  баруун мотор(2,4) +c. Тэр функц шулуун явахад туршигдсан тул тэмдэг зөв.
+ *  Ингэснээр зэрэгцэх зуур робот чигээ (anchor) барина, эргэлдэхгүй.
  * -----------------------------------------------------------------------------
  */
-static void wb_strafe(int vx)
+static void wb_move(int vx, int fwd)
 {
-    motor_control(1, -vx *1.4);   // Урд-Зүүн
-    motor_control(2,  vx *1.4);   // Урд-Баруун
-    motor_control(3,  vx);   // Хойд-Зүүн
-    motor_control(4, -vx);   // Хойд-Баруун
+    LPMS_Read();                                  // gyro шинэ өгөгдөл
+    float off = Get_Yaw_Offset_From_Anchor();     // anchor-аас хазайлт (°)
+    int   c   = (int)(WB_ALIGN_KP * off);
+    if (c >  WB_ALIGN_WMAX) c =  WB_ALIGN_WMAX;
+    if (c < -WB_ALIGN_WMAX) c = -WB_ALIGN_WMAX;
+
+    /* Урд хоёр дугуй (1,2) сул тул хажуулах хүчийг нь суурь WB_ALIGN_FRONT-оор
+       нэмнэ — хажуулах ЧИГЛЭЛД (vx-ийн тэмдгээр). Хойд (3,4) хэвээр.        */
+    int vxf = vx;
+    if      (vxf > 0) vxf += WB_ALIGN_FRONT;
+    else if (vxf < 0) vxf -= WB_ALIGN_FRONT;
+
+    motor_control(1, -vxf + fwd - c);   // Урд-Зүүн  (+ суурь хүч)
+    motor_control(2,  vxf + fwd + c);   // Урд-Баруун (+ суурь хүч)
+    motor_control(3,  vx  + fwd - c);   // Хойд-Зүүн
+    motor_control(4, -vx  + fwd + c);   // Хойд-Баруун
 }
 
 /* -----------------------------------------------------------------------------
@@ -77,8 +110,7 @@ static void wb_show(void)
     setCursor(2, 2);
     printStr("BLUE S:%d", (int)wb_st);
     setCursor(2, 18);
-    printStr("v5:%d v8:%d o:%d", (int)val5, (int)val8,
-             (int)Get_Yaw_Offset_From_Anchor());
+    printStr("v5:%d v8:%d v3:%d", (int)val5, (int)val8, (int)val3);
     setCursor(2, 34);
     printStr("F:%d B:%d", fp, bp);
     setCursor(2, 50);
@@ -94,16 +126,24 @@ void weapon_blue_reset(void)
 {
     wb_st       = WB_S0_DRIVE;
     wb_anchored = 0;
-    wb_s2_init  = 0;
+    wb_srv_init = 0;
+    wb_wait_t0  = 0;
+    wb_v8_t0    = 0;
+    wb_end_t0   = 0;
+    wb_s5_init  = 0;
+    wb_s6_init  = 0;
 }
 
 /* -----------------------------------------------------------------------------
  *  weapon_blue — цэнхэр талбарын дараалал (non-blocking state machine)
  *
  *    S0: val5 == 0 болтол Drive_Straight-ээр шулуун урагш
- *    S1: хоёр рак ХАМТ 1950 руу (Rack_GoTo_Sync)
- *    S2: серво 0° + ЗЭРЭГ зүүн тийш 500мс
- *    S3: val8 == 0 болтол дахин шулуун урагш (S0-ийн anchor-аар)
+ *    S1: хоёр рак ХАМТ 1900 руу (Rack_GoTo_Sync)
+ *    S3: НАМУУХАН урагш + сервог ЗЭРЭГ буулгах, val8 ТАСРАЛТГҮЙ 0 болтол
+ *    S4: val3==1 бол → val3==0 болтол ЗҮҮН тийш (gyro+val8).  val3==0 бол → S4B.
+ *    S4B: val3 мэдэрсэн → 1 сек хүлээгээд → соленоид1 ON + серво 180°
+ *    S5: 500мс УХРАХ + хоёр ракыг 1950 руу (дүүрэн дээш)
+ *    S6: 180° эргэх (ракууд 1950-д) → дуусна
  *
  *  Дуусвал 1, эс бөгөөс 0 буцаана. Loop-д давтан дуудна.
  * -----------------------------------------------------------------------------
@@ -142,49 +182,99 @@ uint8_t weapon_blue(void)
         Drive_Straight(WB_DRIVE_PWM);   // дотроо LPMS_Read() дуудна
         break;
 
-    /* -------- S1: хоёр рак ХАМТ 1950 руу -------- */
+    /* -------- S1: хоёр рак ХАМТ 1900 руу -------- */
     case WB_S1_RACK_UP:
         LPMS_Read();              // жолоо зогссон ч DMA буферээ хоослох
         /* Rack_GoTo_Sync — leader-follower: түрүүлсэн рак нөгөөгөө хүлээнэ.
            Тусад нь Rack_SetTarget хийвэл хүнд front хоцорч Rack_Fault=SYNC. */
         if (Rack_GoTo_Sync(WB_RACK_UP)) {
-            wb_st = WB_S2_SERVO_STRAFE;
+            wb_st = WB_S3_PUSH_VAL8;   // серво буух хүлээлт БАЙХГҮЙ — S3-д зэрэг буулгана
         }
         break;
 
-    /* -------- S2: серво 0° + ЗЭРЭГ зүүн тийш 500мс -------- */
-    case WB_S2_SERVO_STRAFE:
-        LPMS_Read();
-
-        /* Серво нэг удаа тавигдаад цааш өөрөө буунa (эргэх холбоогүй).
-           Тиймээс "хүлээхийн" оронд хажуулалтыг ЗЭРЭГ гүйцэтгэнэ.       */
-        if (!wb_s2_init) {
-            Servo_SetDeg(WB_SERVO_DEG);
-            wb_s2_t0   = HAL_GetTick();
-            wb_s2_init = 1;
+    /* -------- S3: НАМУУХАН урагш + серво ЗЭРЭГ буулгах, val8 0 болтол -------- */
+    case WB_S3_PUSH_VAL8:
+        /* Сервог зогсолгүй, урагш явахтайгаа ЗЭРЭГ буулгана (нэг л удаа команд).
+           Anchor-ыг ДАХИН тавихгүй — S0-д тогтоосон нь талбарын "урагш" чиг.
+           val8 чичиргээнд 0/1 хэлбэлзэж болзошгүй тул WB_VAL8_HOLD_MS хугацаанд
+           ТАСРАЛТГҮЙ 0 байж байж "шахагдсан" гэнэ.                            */
+        if (!wb_srv_init) {
+            Servo_SetDeg(WB_SERVO_DOWN);   // урагш явж байхдаа серво буулгах
+            wb_srv_init = 1;
         }
 
-        if (HAL_GetTick() - wb_s2_t0 >= WB_STRAFE_MS) {
-            brake();
-            wb_st = WB_S3_DRIVE2;
+        if (val8 == 0) {
+            if (wb_v8_t0 == 0) wb_v8_t0 = HAL_GetTick();   // 0 болсон эхлэл
+            if (HAL_GetTick() - wb_v8_t0 >= WB_VAL8_HOLD_MS) {
+                wb_st = WB_S4_ALIGN_VAL3;   // жолоо ЗОГСООХГҮЙ — S4 үргэлжлүүлнэ
+                break;
+            }
+        } else {
+            wb_v8_t0 = 0;                  // 0-оос гарвал тоолуурыг тэглэнэ
+        }
+
+        Drive_Straight(WB_DRIVE_SLOW);    // намуухан — дотроо LPMS_Read() дуудна
+        break;
+
+    /* -------- S4: val3 align -------- */
+    case WB_S4_ALIGN_VAL3:
+        /* val3==0 (мэдэрсэн) бол → 1сек хүлээх төлөв рүү.  val3==1 бол → val3==0
+           болтол ЗҮҮН тийш зэрэгцэнэ (gyro чиг барьж, val8-ыг шахсаар).       */
+        if (val3 == 0) {
+            wb_wait_t0 = HAL_GetTick();
+            wb_st      = WB_S4B_WAIT;
             break;
         }
 
-        wb_strafe(WB_STRAFE_SIGN * WB_STRAFE_PWM);
+        /* vx сөрөг = ЗҮҮН,  fwd сөрөг = урагш (val8 шахалт) */
+        wb_move(-WB_ALIGN_STRAFE, WB_ALIGN_FWD);
         break;
 
-    /* -------- S3: val8 == 0 болтол дахин шулуун урагш -------- */
-    case WB_S3_DRIVE2:
-        /* Anchor-ыг ДАХИН тавихгүй — S0-д тогтоосон нь талбарын "урагш" чиг.
-           Хажуулалт бага зэрэг эргүүлсэн байвал Drive_Straight түүнийг эргүүлж
-           залруулна. Энд дахин anchor тавибал тэр хазайлт ТОГТМОЛ болно.    */
-        if (val8 == 0) {
+    /* -------- S4B: val3 мэдэрсэн → 1 сек хүлээгээд соленоид1 + серво180 -------- */
+    case WB_S4B_WAIT:
+        /* Байрлалаа алдахгүйн тулд намуухан урагш ШАХСААР 1 сек хүлээнэ. */
+        if (HAL_GetTick() - wb_wait_t0 >= WB_VAL3_WAIT_MS) {
+            brake();
+            controlSolenoid(WB_SOLENOID, true);   // соленоид 1 ON
+            Servo_SetDeg(WB_SERVO_UP);            // серво → 180°
+            wb_end_t0 = HAL_GetTick();
+            wb_st     = WB_S5_END_DRIVE;
+            break;
+        }
+
+        Drive_Straight(WB_DRIVE_SLOW);    // 1сек хүлээх зуур байрлалаа барина
+        break;
+
+    /* -------- S5: 1 секунд шулуун УХРАХ -------- */
+    case WB_S5_END_DRIVE:
+        /* Энэ фазд ракуудыг ДҮҮРЭН дээш (1950). 1900-аас ~50 count дээшлэх
+           жижиг хөдөлгөөн тул sync fault-гүй; Rack_Service (ISR) барина.    */
+        if (!wb_s5_init) {
+            Rack_SetTarget(&frontRack, WB_RACK_FULL);
+            Rack_SetTarget(&backRack,  WB_RACK_FULL);
+            wb_s5_init = 1;
+        }
+
+        if (HAL_GetTick() - wb_end_t0 >= WB_END_DRIVE_MS) {
+            brake();
+            wb_st = WB_S6_TURN;
+            break;
+        }
+        Drive_Straight(WB_END_PWM);       // 500мс — УХРАХ (gyro чиг барина)
+        break;
+
+    /* -------- S6: 180° эргэх (ракууд 1950-д) -------- */
+    case WB_S6_TURN:
+        /* Ракууд 1950-д хэвээр (ISR барьсаар). Эргэлт нь мотор 1-4-ийг л
+           ашиглана — рак (мотор 5,6)-тай зөрчилдөхгүй.                       */
+        if (!wb_s6_init) {
+            Gyro_TurnReset();   // өмнөх эргэлтийн үлдэгдэл төлвийг цэвэрлэх
+            wb_s6_init = 1;
+        }
+        if (Gyro_TurnAngle(WB_TURN_DEG)) {   // дуусвал 1 (дотроо LPMS_Read)
             brake();
             wb_st = WB_DONE;
-            break;
         }
-
-        Drive_Straight(WB_DRIVE_PWM);   // дотроо LPMS_Read() дуудна
         break;
 
     /* -------- Дууссан -------- */

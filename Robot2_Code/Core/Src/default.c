@@ -138,6 +138,9 @@ static const char *const mode_name[] = {
     "Climb 2",          // 13
     "Climb 3",          // 14
     "Rack serial",      // 15  ⚠ UART4 — LPMS-тэй зөрчилдөнө
+    "Link fwd status",  // 16  USART2 (PA2) — PS5-ийг PCB2 руу дамжуулах статус
+    "MANUAL climb",     // 17  стик→runner  +  L1/R1/L2/R2/△/✕→рак
+    "WEAPON test",      // 18  стик→runner, L1..R2→рак, △→серво, D-Up→соленоид1
 };
 #define MODE_COUNT  ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
 
@@ -246,6 +249,19 @@ void selectMode(void)
            протокол нэг шугам дээр холилдож хоёул ажиллахгүй.            */
         while (true) { Rack_Telemetry_Serial(); }
 
+    case 16:                                 // дамжуулалт нь ISR-т автоматаар явна
+        while (true) { Link_Status_Test(); }
+
+    case 17:
+        /* ГАРЫН ГОРИМ: жолоо + рак ЗЭРЭГ.
+           Rack_Climb_Test нь зөвхөн Rack_SetTarget (мотор 5/6, ISR-ээр) хийж,
+           мотор 1-4-ийг хөнддөггүй тул runner-тэй зөрчилдөхгүй. OLED-ийг мөн
+           зөвхөн тэр зурна.                                                */
+        while (true) { mode_check_rack(); Rack_Climb_Test(); runner(); }
+
+    case 18:
+        while (true) { test_weapon(); }   // дотроо Rack_Fault шалгана
+
     default:
         while (true) { }
     }
@@ -262,6 +278,13 @@ void selectMode(void)
  */
 void motor_control(uint8_t type, int PWM)
 {
+    /* ⚠ ФИЗИК УТАС СОЛИГДСОН: мотор 1 ба 4-ийн холболт солигдсон. Энд НЭГ Л
+     *   удаа сольж өгснөөр дуудагч БҮГД (runner, эргэлтийн PID, Drive_Straight,
+     *   test_motor) логик дугаараа (1 = урд-зүүн) ҮНЭН хэвээр ашиглана.
+     *   Утсаа буцааж залгавал энэ 3 мөрийг устга.                             */
+    if      (type == 1) type = 4;
+    else if (type == 4) type = 1;
+
     uint8_t direction = (PWM < 0) ? 0 : 1;   // 0 = ухрах, 1 = урагш
     uint8_t do_brake  = (PWM == 0);          // 0 → тоормослох
     if (PWM < 0)    PWM = -PWM;               // хэмжээ (абсолют утга) авах

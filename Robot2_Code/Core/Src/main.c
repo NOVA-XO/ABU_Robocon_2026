@@ -26,6 +26,7 @@
 #include "general.h"
 #include "test.h"
 #include <stdio.h>
+#include <string.h>   // memcpy() — PS5 багцыг PCB2 руу дамжуулахад
 #include "red.h"
 #include "blue.h"
 #include "sequence.h"
@@ -93,6 +94,11 @@ uint8_t information[23];  // шинэ урт
 uint8_t rx_idx = 0;
 uint8_t data;
 
+/* ---- USART2 (PA2) → 2 дахь PCB руу PS5 багц дамжуулах ------------------- */
+uint8_t           link_tx[23];        // Transmit_IT-ийн буфер (information-оос хуулна)
+volatile uint32_t link_fwd_n    = 0;  // амжилттай дамжуулсан багц
+volatile uint32_t link_fwd_skip = 0;  // BUSY-аас болж алгассан багц
+
 /* -----------------------------------------------------------------------------
  *  HAL_UART_RxCpltCallback — ESP32-оос ирсэн PS5 багцыг задлах (huart3, 1 байт/удаа)
  *
@@ -150,6 +156,26 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             control_data[i][j] = 0;
           }
         }
+      }
+
+      /* ===== 2 дахь PCB руу ДАМЖУУЛАХ (USART2, PA2) =====
+       *  PS5 нэг ширхэг — түүнийг ЭНЭ самбарт залгаад PCB2 руу дамжуулна.
+       *
+       *  Түүхий 23 байтыг ЯГ ТЭР ХЭВЭЭР нь дамжуулна (дахин задлаж угсрахгүй).
+       *  Тиймээс PCB2 нь ЯГ ижил задлагч ашиглана — формат хэзээ ч зөрөхгүй.
+       *
+       *  Transmit_IT — blocking БИШ. HAL_UART_Transmit (blocking) бол 23 байт
+       *  @115200 = ~2мс ISR дотор гацна, тэр нь бусад тасалдлыг хойшлуулна.
+       *
+       *  Өмнөх дамжуулалт дуусаагүй бол HAL_BUSY буцаана → энэ багцыг чимээгүй
+       *  алгасана. ESP32 нь ~10-20мс тутам илгээдэг, дамжуулалт 2мс тул
+       *  давхцах нь ховор; давхцлаа ч дараагийн багц шууд ирнэ.
+       */
+      memcpy(link_tx, information, 23);
+      if (HAL_UART_Transmit_IT(&huart2, link_tx, 23) == HAL_OK) {
+        link_fwd_n++;
+      } else {
+        link_fwd_skip++;
       }
 
       rx_idx = 0;

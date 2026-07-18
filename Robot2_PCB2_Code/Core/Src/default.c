@@ -116,7 +116,7 @@ void controlServo(bool isServo, int angle)
  * -----------------------------------------------------------------------------
  */
 static const char *const mode_name[] = {
-    "RUN",              //  0  үндсэн код (бичигдээгүй)
+    "RUN manual",       //  0  ҮНДСЭН: L1/L2→M6, R1/R2→M4, D-Up/Dn→M5, товч→соленоид
     "Joystick",         //  1
     "Encoder",          //  2
     "Sensor v1-v8",     //  3
@@ -125,6 +125,7 @@ static const char *const mode_name[] = {
     "Servo",            //  6
     "Runner",           //  7
     "Serial",           //  8
+    "Link RX <- PCB1",  //  9  USART2 (PA3) — 1-р PCB-ээс байт хүлээж авах
 };
 #define MODE_COUNT  ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
 
@@ -172,8 +173,8 @@ void selectMode(void)
     /* ---- Сонгосон горимыг ажиллуулах (бүгд БУЦАХГҮЙ) ---- */
     switch (mode) {
 
-    case 0:                                  // TODO: 2 дахь PCB-ийн үндсэн код
-        while (true) { }
+    case 0:                                  // ҮНДСЭН гарын удирдлага (PS5 нь PCB1-ээс)
+        while (true) { PCB2_Manual(); }
 
     case 1:
         while (true) { test_joyStick(); }
@@ -203,6 +204,9 @@ void selectMode(void)
                 send_uart("\n");
             }
         }
+
+    case 9:                                  // PCB1 PA2 → энэ самбарын PA3 (+ GND)
+        while (true) { Link_Recv_Test(); }
 
     default:
         while (true) { }

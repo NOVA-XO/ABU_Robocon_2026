@@ -29,6 +29,7 @@ uint8_t Turn_Left_90(void);           // зүүн 90° (дуусвал 1)
 uint8_t Turn_Right_90(void);          // баруун 90° (дуусвал 1)
 void    Gyro_Turn_Test(void);         // D-Left/D-Right→90°, D-Down→таслах, L1..R2→рак
 void    Drive_Straight_Test(void);    // ЗӨВХӨН шулуун явах: D-Up сэлгэх, L1/R1 хурд
+void    Link_Status_Test(void);     // PCB2 руу PS5 дамжуулж буй эсэхийг харах
 int     Rack_Preset_Buttons(void);    // рак preset товчны логик (OLED-гүй), буц: зорилт
 int     Servo_Preset_Buttons(void);   // серво товчны логик (OLED-гүй), буц: өнцөг
 
@@ -81,6 +82,7 @@ typedef struct {
     uint32_t last_ms;
     uint8_t  holding;     // (нөөц) hysteresis төлөв
     uint8_t  home_prev;   // limit switch-ийн өмнөх төлөв (ирмэг таних)
+    float    down_lim;    // буултын хурдны governor-ийн одоогийн PWM хязгаар
 } Rack_t;
 
 /* -----------------------------------------------------------------------------
@@ -119,7 +121,7 @@ uint8_t Rack_Fault(void);                       // 0 = OK, 1 = timeout, 2 = sync
 void    Robot_Error(const char *msg);           // жолоо зогс, рак 0,0 руу буулга, зогс (буцдаггүй)
 
 /* Rack удирдлага (Rack_SetHome-ын ДАРАА) */
-void    Rack_Climb_Test(void);       // L1→2уул0  R1→2уул1000  L2→front0  R2→back0 (тусад нь; авирах тест)
+void    Rack_Climb_Test(void);       // L1/R1→2уул 0/1000,  L2/△→front 0/1000,  R2/✕→back 0/1000
 void    Rack_Preset_Control(void);   // L1→0  L2→900  R1→1350  R2→1950 (хоёулаа хамт; тогтмол preset)
 
 /* Серво (1 серво, htim1 CH1), ГРАДУСААР — асаахад 180° */
@@ -127,6 +129,9 @@ void    Servo_Preset_Control(void);             // Cross +5°  Triangle −5°  
 
 /* Соленоид 1 — D-Up товчоор toggle (debounce, давталтгүй) */
 void    Solenoid_Control(void);
+
+/* Гарын нэгдсэн тест: стик→runner, L1..R2→рак, △→серво, D-Up→соленоид1 */
+void    test_weapon(void);
 
 /* Тааруулгын телеметр: UART4 (115200) руу TSV — tgt/pos/pwm/integral/switch */
 void    Rack_Telemetry_Serial(void);

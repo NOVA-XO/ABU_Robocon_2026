@@ -22,6 +22,7 @@ extern TIM_HandleTypeDef htim13;
 
 extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart3;
+extern UART_HandleTypeDef huart2;   // PA2/PA3 — 2 дахь PCB рүү холбоо
 
 extern ADC_HandleTypeDef hadc1;
 
@@ -32,6 +33,10 @@ extern int timer;                 // TIM7-оос нэмэгддэг зөөлөн
 
 extern uint8_t usb_received_value;
 extern uint8_t usb_new_data_flag;
+
+/* ---- USART2 дамжуулалтын тоолуур (main.c-д, RX ISR бичнэ) -------------- */
+extern volatile uint32_t link_fwd_n;
+extern volatile uint32_t link_fwd_skip;
 
 /* ---- Серво: одоогийн өнцөг (Servo_Preset_Control бичнэ, OLED уншина) ------
  *  SERVO_DEG_MAX нь general.h-д (Servo_SetDeg-ийн дуудагчид хэрэгтэй).       */
@@ -86,6 +91,8 @@ void runner(void) {
     }
 
     // --- PWM болгож моторт өгөх ---
+    //  1↔4 физик солилтыг motor_control дотор ТӨВЛӨРҮҮЛЖ зассан тул эндхийн
+    //  логик дугаар (1=FL) ҮНЭН хэвээр — энд юу ч солихгүй.
     motor_control(1, fl * SPEED_GAIN);   // Урд-Зүүн
     motor_control(2, fr * SPEED_GAIN);   // Урд-Баруун
     motor_control(3, rl * SPEED_GAIN);   // Хойд-Зүүн
@@ -171,7 +178,14 @@ void Drive_Straight(int base_pwm) {
  *  RACK_LAND_MIN_PWM → switch дээр газардах үеийн PWM (хэт бага бол хүрэлгүй зогсоно)
  */
 #define RACK_LAND_ZONE     600   // 0-оос энэ зайд орохоос эхлэн удаашруулна (count)
-#define RACK_LAND_MIN_PWM   70   // газардах агшны хамгийн бага PWM
+#define RACK_LAND_MIN_PWM   50   // газардах агшны хамгийн бага PWM (governor-ийн ШАЛ)
+
+/* ---- ХУРДНЫ ХЯЗГААРЛАГЧ (closed-loop, зөвхөн land_soft = хоёулаа хамт) ----
+ *  Open-loop PWM таглах нь ачаа/үрэлтээс болж бодит хурд өөр өгдөг. Үүний оронд
+ *  encoder-ээр бодит буух хурдыг (count/cycle) хэмжиж, зорьсон VMAX-д барина —
+ *  ЭХНИЙ огцом унал ч тодорхой хурдаар хязгаарлагдана.                          */
+#define RACK_DOWN_VMAX     1.8f  // зорилтот буух хурд (count / RACK_DT_MS цикл)
+#define RACK_DOWN_STEP     6.0f  // governor нэг циклд PWM-ийг тохируулах алхам
 
 /* ---- Аюулгүй байдал (Rack_Fault) — ТЕЛЕМЕТРЭЭР ТААРУУЛСАН -----------------
  *  Хэмжилт (50мс/мөр): бүтэн зам 0→1950 нь ~25 мөр ≈ 1250мс. Өгсөх үед front/back
@@ -180,8 +194,11 @@ void Drive_Straight(int base_pwm) {
  *             триггергүй; батарей суларвал ч бүтэн зам үүнээс богино).
  *    SYNC_MAX = хэвийн ~70-ийн ~4x = 300 (нэг рак гацвал зөрүү үүнийг хурдан
  *             давна; хэвийн 70 зөрүүнд худал триггер өгөхгүй). */
-#define RACK_TIMEOUT_MS   3500   // зорилтод хүрэх дээд хугацаа; хэтэрвэл алдаа
-                                 //   2500 нь удаан (ачаатай) авиралтад БУРУУ асч байв → 3500
+#define RACK_TIMEOUT_MS   6000   // зорилтод хүрэх / БАРИХ дээд хугацаа; хэтэрвэл алдаа
+                                 //   2500→3500: удаан ачаатай авиралт.  3500→6000:
+                                 //   weapon_blue-д рак олон секунд 1900-д БАРИХ ёстой —
+                                 //   хүнд front сажиж integral нөхтөл 3500 хэтэрч БУРУУ
+                                 //   timeout асч байв. Жинхэнэ гацалт мөн л фаульт өгнө.
 #define RACK_SYNC_MAX      450   // Rack_Fault-ийн ХЯЗГААР (count) — синхрончлол дампуурвал барина
 #define RACK_SYNC_BAND     150   // Rack_GoTo_Sync: хоёр рак нэг нэгнээсээ хамгийн ихдээ энэ зайд
                                  //   (< RACK_SYNC_MAX байх ёстой; band барихад зөрүү үүнээс хэтрэхгүй)
@@ -440,14 +457,27 @@ static uint8_t rack_step(Rack_t *r, int target) {
         }
 
         // ---- 0 (доод тулгуур) руу буух үед: land_soft-оос хамаарна ----
-        //   ЗӨӨЛӨН (land_soft=1): хол байхад pwm_down, switch рүү ойртох тусам
-        //     ШУГАМААР удааширч RACK_LAND_MIN_PWM хүртэл буурна → зөөлөн газардана.
-        //   ХҮЧТЭЙ (land_soft=0): удаашруулахгүй — бүрэн pwm_down-оор шууд татна
-        //     (ачаатай ракыг тусад нь буулгахад хэрэгтэй).
+        //   ЗӨӨЛӨН (land_soft=1) = ХОЁУЛАА зэрэг буух: ХУРДНЫ ХЯЗГААРЛАГЧ.
+        //     d_filt = буурч буй count/cycle (буух үед эерэг) = бодит буух хурд.
+        //     Хурд VMAX-аас их бол PWM хязгаарыг бууруулж, бага бол нэмнэ →
+        //     эхний огцом унал ч тодорхой хурдаар барина (ачаанаас үл хамаарна).
+        //     down_lim нь Rack_SetTarget-д намуханаас (LAND_MIN) эхэлдэг.
+        //   ХҮЧТЭЙ (land_soft=0) = ТУСАД НЬ буух: удаашруулахгүй — бүрэн pwm_down
+        //     (одоогийн хурдаараа; ачаатай ракыг тусад нь татахад хэрэгтэй).
         uint8_t landing = (!raised && error < 0.0f);
-        if (landing && r->land_soft && aerr < (float)RACK_LAND_ZONE) {
-            int span = r->pwm_down - RACK_LAND_MIN_PWM;
-            int land = RACK_LAND_MIN_PWM + (int)(((float)span * aerr) / (float)RACK_LAND_ZONE);
+        if (landing && r->land_soft) {
+            float speed = r->d_filt;                         // count/cycle (буух үед +)
+            if (speed > RACK_DOWN_VMAX) r->down_lim -= RACK_DOWN_STEP;   // хурдан → сааруул
+            else                        r->down_lim += RACK_DOWN_STEP;   // удаан → нэм
+            if (r->down_lim < (float)RACK_LAND_MIN_PWM) r->down_lim = (float)RACK_LAND_MIN_PWM;
+            if (r->down_lim > (float)r->pwm_down)       r->down_lim = (float)r->pwm_down;
+
+            int land = (int)r->down_lim;
+            if (aerr < (float)RACK_LAND_ZONE) {              // switch рүү ойртвол нэмж зөөлрүүл
+                int near = RACK_LAND_MIN_PWM +
+                    (int)(((float)(land - RACK_LAND_MIN_PWM) * aerr) / (float)RACK_LAND_ZONE);
+                if (land > near) land = near;
+            }
             if (lim > land) lim = land;
         }
 
@@ -528,6 +558,9 @@ uint8_t Rack_GoTo_Sync(int target) {
 void Rack_SetTarget(Rack_t *r, int target) {
     if (target > r->pos_max) target = r->pos_max;
     if (target < r->pos_min) target = r->pos_min;
+    if (target != r->target) {                    // зорилт ШИНЭЭР өөрчлөгдсөн
+        r->down_lim = (float)RACK_LAND_MIN_PWM;   // буулт бол намуханаас эхэл (огцом уналгүй)
+    }
     r->target = target;
     r->active = 1;
 }
@@ -723,11 +756,12 @@ static uint8_t btn_step(Btn_t *b, uint8_t raw) {
 
 
 /* =============================================================================
- *  RACK_CLIMB_TEST — L1/R1 ХОЁУЛАНГ, L2/R2 нэг ракийг тусад нь удирдана
- *  (front/back-ийг ТУСАД НЬ хөдөлгөж шатанд авирахад турших горим)
+ *  RACK_CLIMB_TEST — рак бүрийг ТУСАД НЬ, эсвэл хоёуланг ЗЭРЭГ удирдана
+ *  (шатанд авирч буухад front/back-ийг ээлжлэн татахад)
  *
- *    L1 → ХОЁУЛАА  0       R1 → ХОЁУЛАА  1000
- *    L2 → FRONT    0       R2 → BACK     0
+ *    ХОЁУЛАА:   L1 → 0            R1 → 1000
+ *    FRONT:     L2 → 0            △  → 1000
+ *    BACK:      R2 → 0            ✕  → 1000
  *
  *  L1/R1 нь хоёр ракийг зэрэг; L2/R2 нь нөгөөг нь ХӨНДӨХГҮЙ, зөвхөн нэгийг нь
  *  0 руу буулгана. Rack_SetTarget зорилтыг тавьж, TIM7 ISR доторх Rack_Service
@@ -767,10 +801,11 @@ static uint8_t btn_rising(Btn_t *b, uint8_t raw) {
 }
 
 void Rack_Climb_Test(void) {
-    static Btn_t bL1 = {0}, bR1 = {0}, bL2 = {0}, bR2 = {0};
+    static Btn_t bL1 = {0}, bR1 = {0}, bL2 = {0}, bR2 = {0}, bTri = {0}, bCross = {0};
     static int   tgtFront = 0, tgtBack = 0;   // зорилтууд (homing-ийн дараа 0)
 
     /* control_data[3]:  [0]=L1  [1]=R1  [2]=L2  [3]=R2
+     * control_data[1]:  [0]=✕   [1]=▭   [2]=△   [3]=○
      * land_soft: ХОЁУЛАА зэрэг 0 → ЗӨӨЛӨН,  ТУСАД НЬ 0 → ХҮЧТЭЙ */
     if (btn_rising(&bL1, (uint8_t)control_data[3][0])) {   // L1 → ХОЁУЛАА доош (зөөлөн)
         tgtFront = RACK_LEVEL_DOWN;  frontRack.land_soft = 1;
@@ -785,6 +820,13 @@ void Rack_Climb_Test(void) {
     }
     if (btn_rising(&bR2, (uint8_t)control_data[3][3])) {   // R2 → зөвхөн BACK доош (хүчтэй)
         tgtBack  = RACK_LEVEL_DOWN;  backRack.land_soft = 0;
+    }
+    /* --- Тусад нь ДЭЭШ: авираад буухад рак бүрийг ээлжлэн татахад --- */
+    if (btn_rising(&bTri, (uint8_t)control_data[1][2])) {  // △ → зөвхөн FRONT дээш
+        tgtFront = RACK_LEVEL_UP;
+    }
+    if (btn_rising(&bCross, (uint8_t)control_data[1][0])) { // ✕ → зөвхөн BACK дээш
+        tgtBack  = RACK_LEVEL_UP;
     }
 
     /* Зорилтыг тавина — байрлалыг Rack_Service (TIM7 ISR) тасралтгүй барина */
@@ -980,6 +1022,49 @@ void Solenoid_Control(void) {
     if (btn_rising(&btn, (uint8_t)control_data[2][SOLENOID1_BTN])) {
         state = !state;                               // ON ↔ OFF
         controlSolenoid(SOLENOID1_NUM, state);
+    }
+}
+
+
+/* =============================================================================
+ *  test_weapon — ГАРЫН НЭГДСЭН ТЕСТ (жолоо + рак + серво + соленоид)
+ *
+ *    Стик        → runner() (mecanum жолоо)
+ *    L1/L2/R1/R2 → рак preset:  0 / 900 / 1350 / 1950  (хоёулаа хамт)
+ *    △ (Triangle)→ серво 0° ↔ 180° toggle
+ *    D-Up        → соленоид 1 toggle
+ *
+ *  ⚠ Rack_Preset_Buttons / Servo_Preset_Buttons — OLED-ГҮЙ хувилбарууд.
+ *    Бүтэн Rack_Preset_Control / Servo_Preset_Control нь тус бүр 100мс тутам
+ *    дэлгэцийг бүхэлд нь дарж бичдэг — хамт дуудвал анивчиж уншигдахгүй болно.
+ *    Тиймээс товчны логикийг нь салгаж, доор НЭГ л дэлгэц зурна.
+ *
+ *  runner (мотор 1-4) ба рак (мотор 5,6 — ISR-service) зөрчилдөхгүй тул зэрэг.
+ * =============================================================================
+ */
+void test_weapon(void) {
+    /* Ракийн алдаа — БҮХ үед (Rack_Service нь ISR-т ажиллана) */
+    uint8_t f = Rack_Fault();
+    if (f) Robot_Error(f == 1 ? "RACK TIMEOUT" : "RACK SYNC");
+
+    runner();                                  // стик → жолоо (мотор 1-4)
+    int rack_tgt  = Rack_Preset_Buttons();     // L1/L2/R1/R2 → рак preset
+    int servo_deg = Servo_Preset_Buttons();    // △ → серво 0/180 toggle
+    Solenoid_Control();                        // D-Up → соленоид 1 toggle
+
+    static uint32_t t = 0;
+    if (HAL_GetTick() - t >= 100) {
+        t = HAL_GetTick();
+        colorFill(Black);
+        setCursor(2, 2);
+        printStr("WEAPON");
+        setCursor(2, 18);
+        printStr("P:%d S:%d", rack_tgt, servo_deg);
+        setCursor(2, 34);
+        printStr("F:%d B:%d", counter[frontRack.enc], counter[backRack.enc]);
+        setCursor(2, 50);
+        printStr("LX:%d LY:%d", control_data[0][0], control_data[0][1]);
+        setScreen();
     }
 }
 
@@ -1678,5 +1763,39 @@ void USB_Show_OLED(void)
         printStr("Status: ???");
     }
 
+    setScreen();
+}
+
+
+/* =============================================================================
+ *  Link_Status_Test — PCB2 руу PS5 дамжуулж байгаа эсэхийг харах (USART2, PA2)
+ *
+ *  ⚠ ЭНЭ ФУНКЦ ЮУ Ч ИЛГЭЭХГҮЙ. Дамжуулалт нь main.c-ийн HAL_UART_RxCpltCallback
+ *    дотор ESP32-оос багц бүрдэх бүрд АВТОМАТААР явагдана — горимоос хамаарахгүй.
+ *    Энд байт илгээвэл тэр урсгалын дундуур орж багцыг эвдэнэ.
+ *
+ *  Утас: PCB1 PA2 (TX) → PCB2 PA3 (RX),  БАС GND ↔ GND (заавал).
+ *
+ *  fwd  = амжилттай дамжуулсан багц (ESP32-ийн давтамжаар өснө)
+ *  skip = өмнөх дамжуулалт дуусаагүйгээс алгассан (цөөн байх ёстой)
+ *  con  = PS5 холбогдсон эсэх (0 бол ESP32 холбоогүй гэж мэдээлж байна)
+ * =============================================================================
+ */
+void Link_Status_Test(void) {
+    static uint32_t t = 0;
+    if (HAL_GetTick() - t < 100) return;
+    t = HAL_GetTick();
+
+    /* PS5 холбогдсоныг control_data-аас шууд мэдэх аргагүй (холбоогүй үед бүгд 0)
+       тул стик/товч ямар нэг хөдөлгөөнийг л харуулна. */
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("LINK FWD");
+    setCursor(2, 18);
+    printStr("fwd:%lu", (unsigned long)link_fwd_n);
+    setCursor(2, 34);
+    printStr("skip:%lu", (unsigned long)link_fwd_skip);
+    setCursor(2, 50);
+    printStr("LX:%d LY:%d", control_data[0][0], control_data[0][1]);
     setScreen();
 }

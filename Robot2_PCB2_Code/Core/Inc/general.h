@@ -35,6 +35,12 @@ void    Servo_Preset_Control(void);   // Servo_Preset_Buttons + OLED
 /* ---- Соленоид 1 — D-Up товчоор toggle (debounce, давталтгүй) ------------- */
 void    Solenoid_Control(void);
 
+/* ---- USART2 холбоо: 1-р PCB-ээс ирэх өгөгдлийг турших ------------------- */
+void    Link_Recv_Test(void);
+
+/* ---- ҮНДСЭН ГАРЫН УДИРДЛАГА (PS5 нь PCB1-ээс USART2-оор ирнэ) ----------- */
+void    PCB2_Manual(void);            // L1/L2→M6, R1/R2→M4, D-Up/Dn→M5, товч→соленоид 1-6
+
 /* ---- ADC / OLED туслах --------------------------------------------------- */
 uint16_t Read_PC3(void);
 void     Read_PC3_OLED(void);
