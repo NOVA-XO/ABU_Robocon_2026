@@ -4,7 +4,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug Robot2_Code (ST-Link)",
+            "name": "Debug PCB1",
             "type": "cortex-debug",
             "request": "launch",
             "servertype": "stlink",
