@@ -28,6 +28,8 @@ uint8_t Gyro_TurnFail(void);          // 0=амжилттай, 1=TIMEOUT, 2=чи
 uint8_t Turn_Left_90(void);           // зүүн 90° (дуусвал 1)
 uint8_t Turn_Right_90(void);          // баруун 90° (дуусвал 1)
 void    Gyro_Turn_Test(void);         // D-Left/D-Right→90°, D-Down→таслах, L1..R2→рак
+void    Gyro_Strafe_Test(void);       // рак 600 + ✕→1сек зүүн/1сек баруун (gyro чиг барих)
+void    Strafe_Gyro(int vx);          // gyro-гоор strafe (vx>0 баруун, vx<0 зүүн) — grab-д
 void    Drive_Straight_Test(void);    // ЗӨВХӨН шулуун явах: D-Up сэлгэх, L1/R1 хурд
 void    Link_Status_Test(void);     // PCB2 руу PS5 дамжуулж буй эсэхийг харах
 int     Rack_Preset_Buttons(void);    // рак preset товчны логик (OLED-гүй), буц: зорилт
@@ -56,7 +58,9 @@ typedef struct {
     float    kp, ki, kd;
     float    i_max;       // integral хязгаар (anti-windup)
     int      pwm_up;      // ДЭЭШ явах хурд (хүчтэй)
-    int      pwm_down;    // ДООШ явах хурд (хэвийн)
+    int      pwm_down;    // ДООШ явах хурд (land_soft=0 ХҮЧТЭЙ/соло буулт)
+    int      pwm_soft;    // ЗӨӨЛӨН (land_soft=1) буултын governor-ийн ДЭЭД PWM
+                          //   (pwm_down-оос ТУСДАА — хамтдаа буухыг намуухан барина)
     int      hold_pwm;    // байрлал барих feedforward (таталцал нөхөх)
     int      min_pwm;     // мотор хөдлөх доод босго
     int      tolerance;   // зорилтод хүрсэн гэж үзэх хүлцэл
@@ -72,8 +76,9 @@ typedef struct {
     int      last_pwm;    // сүүлд моторт өгсөн PWM
 
     /* --- алдаа хянах (rack_step бичнэ; Rack_Fault уншина) --- */
-    int      cmd_target;  // сүүлд rack_step-д өгсөн зорилт
-    uint32_t move_t0;     // зорилт өөрчлөгдсөн / сүүлд хүрсэн агшин (timeout хэмжих)
+    int      cmd_target;   // сүүлд rack_step-д өгсөн зорилт
+    uint32_t move_t0;      // зорилт өөрчлөгдсөн / сүүлд хүрсэн агшин (timeout хэмжих)
+    uint32_t last_step_ms; // сүүлд rack_step дуудагдсан агшин (команд аваагүй = идэвхгүй)
 
     /* --- дотоод төлөв (гараар бүү хүр) --- */
     float    prev_err;
@@ -110,6 +115,7 @@ void    Rack_Reset(Rack_t *r);              // PID төлвийг л цэвэр�
 void    Rack_Jog(Rack_t *r, int dir);       // dir: +1 дээш, -1 доош, 0 зогс
 uint8_t Rack_GoTo(Rack_t *r, int target);   // байрлал руу; хүрвэл 1, эс бөгөөс 0
 uint8_t Rack_GoTo_Sync(int target);         // ХОЁР ракыг ХАМТ, зэрэгцүүлж; хоёул хүрвэл 1
+uint8_t Rack_GoTo_Sync_Front(int base, int front_offset);  // синхрон, front нь +offset өндөр
 
 /* ISR-service горим: зорилт тавиад TIM7 ISR-т Rack_Service байнга барина */
 void    Rack_SetTarget(Rack_t *r, int target);  // зорилт тавьж, active = 1
@@ -133,8 +139,11 @@ void    Solenoid_Control(void);
 /* Гарын нэгдсэн тест: стик→runner, L1..R2→рак, △→серво, D-Up→соленоид1 */
 void    test_weapon(void);
 
-/* Тааруулгын телеметр: UART4 (115200) руу TSV — tgt/pos/pwm/integral/switch */
+/* Тааруулгын телеметр: UART4 (115200) руу TSV — timer/tgt/pos/pwm/integral/switch */
 void    Rack_Telemetry_Serial(void);
+
+/* СОЛО рак тест: △/✕ front, ○/▭ back дээш/доош (land_soft=0) + UART4 + OLED */
+void    Rack_Solo_Test(void);
 
 /* Тааруулга: PS5 D-pad Дээш/Доош-оор тогтмол PWM тааруулах (open-loop тест) */
 int     Rack_PWM_Tune(uint8_t motor);           // motor 5=front / 6=back; буцаана: одоогийн PWM

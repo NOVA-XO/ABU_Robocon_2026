@@ -9,18 +9,25 @@
 
 #if defined(SSD1306_USE_I2C)
 
+/* I2C дамжуулалтын timeout (ms). Дэлгэц салсан үед HAL_MAX_DELAY (хязгааргүй)
+ * нь БҮХ горимыг мөнхөд гацаадаг байсан — үүнийг тодорхой хугацаагаар хязгаарлав.
+ * Холбоотой үед 130 байт @400kHz ≈ 3ms тул 20ms нь хангалттай нөөцтэй.       */
+#ifndef SSD1306_I2C_TIMEOUT
+#define SSD1306_I2C_TIMEOUT  20
+#endif
+
 void oledReset(void) {
     /* for I2C - do nothing */
 }
 
 // Send a byte to the command register
 void ssd1306_WriteCommand(uint8_t byte) {
-    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x00, 1, &byte, 1, HAL_MAX_DELAY);
+    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x00, 1, &byte, 1, SSD1306_I2C_TIMEOUT);
 }
 
 // Send data
 void ssd1306_WriteData(uint8_t* buffer, size_t buff_size) {
-    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x40, 1, buffer, buff_size, HAL_MAX_DELAY);
+    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x40, 1, buffer, buff_size, SSD1306_I2C_TIMEOUT);
 }
 
 #elif defined(SSD1306_USE_SPI)

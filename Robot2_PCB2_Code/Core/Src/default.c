@@ -8,6 +8,7 @@
  */
 #include "default.h"
 #include "test.h"
+#include "tactic.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include "string.h"
@@ -117,15 +118,19 @@ void controlServo(bool isServo, int angle)
  */
 static const char *const mode_name[] = {
     "RUN manual",       //  0  ҮНДСЭН: L1/L2→M6, R1/R2→M4, D-Up/Dn→M5, товч→соленоид
-    "Joystick",         //  1
-    "Encoder",          //  2
+    "Tactic grid",      //  1  Scroll&Zone: 3x4 сүлжээ + SET→PCB1 (PCB1 мод 1-тэй)
+    "Grab test",        //  2  △→шоо-авах бүтэн тест (PCB1 мод 2-тэй ХАМТ)
     "Sensor v1-v8",     //  3
     "Motor",            //  4
     "Solenoid",         //  5
-    "Servo",            //  6
-    "Runner",           //  7
-    "Serial",           //  8
-    "Link RX <- PCB1",  //  9  USART2 (PA3) — 1-р PCB-ээс байт хүлээж авах
+    "Serial",           //  6  UART4 (115200) — энэ самбарт чөлөөтэй
+    "Link RX <- PCB1",  //  7  USART2 (PA3) — 1-р PCB-ээс байт хүлээж авах
+    "Sun gear 0/90/180",//  8  encoder0-оор нарны араа (△→0 O→90 □→-90 X→180) + UART4
+    "Moon gear 3-pos",  //  9  мотор6/encoder1 — □→-148 △→0 O→140 (jog+P-hold)
+    "Joystick",         // 10  joystick тест (өмнө нь мод 1)
+    "Sun-Moon",         // 11  sun←face(△○▭✕)  moon←D-pad  тусад нь + UART4
+    "Auto seq []",      // 12  ▭→ sun-90→sol5→sol1→moon120 (дараалсан) + UART4
+    "Encoder",          // 13  encoder статус (өмнө нь мод 2)
 };
 #define MODE_COUNT  ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
 
@@ -176,11 +181,11 @@ void selectMode(void)
     case 0:                                  // ҮНДСЭН гарын удирдлага (PS5 нь PCB1-ээс)
         while (true) { PCB2_Manual(); }
 
-    case 1:
-        while (true) { test_joyStick(); }
+    case 1:                                  // тактикийн сүлжээ (Scroll & Zone Tracker)
+        while (true) { Tactic_Task(); }
 
-    case 2:
-        while (true) { showEncoderStatus(); }
+    case 2:                                  // △→шоо-авах бүтэн тест (PCB1 мод 2-тэй ХАМТ)
+        while (true) { Grab_Test(); }
 
     case 3:
         while (true) { test_sensor(); }
@@ -191,13 +196,7 @@ void selectMode(void)
     case 5:
         while (true) { testOptocoupler(); }
 
-    case 6:                                  // △ → серво 0° ↔ 180°
-        while (true) { Servo_Preset_Control(); }
-
-    case 7:                                  // гарын жолоо
-        while (true) { runner(); }
-
-    case 8:                                  // UART4 (115200) — энэ самбарт чөлөөтэй
+    case 6:                                  // UART4 (115200) — энэ самбарт чөлөөтэй
         while (true) {
             for (int i = 0; i < 1000; i++) {
                 send_uart_int(i);
@@ -205,8 +204,26 @@ void selectMode(void)
             }
         }
 
-    case 9:                                  // PCB1 PA2 → энэ самбарын PA3 (+ GND)
+    case 7:                                  // PCB1 PA2 → энэ самбарын PA3 (+ GND)
         while (true) { Link_Recv_Test(); }
+
+    case 8:                                  // нарны араа: encoder0-оор өнцгийн preset
+        while (true) { sun_gear(); }
+
+    case 9:                                  // сарны араа: мотор6/encoder1 jog + хэмжилт
+        while (true) { moon_gear(); }
+
+    case 10:                                 // joystick тест (өмнө нь мод 1)
+        while (true) { test_joyStick(); }
+
+    case 11:                                 // sun+moon нэг товчоор зэрэг pose
+        while (true) { sun_moon(); }
+
+    case 12:                                 // ▭ → автомат дараалал (sun/sol/moon)
+        while (true) { auto_seq(); }
+
+    case 13:                                 // encoder статус (өмнө нь мод 2)
+        while (true) { showEncoderStatus(); }
 
     default:
         while (true) { }

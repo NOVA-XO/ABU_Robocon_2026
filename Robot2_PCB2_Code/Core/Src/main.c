@@ -13,7 +13,7 @@
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
   *
-  ***************************************c***************************************
+  ******************************************************************************
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -94,6 +94,16 @@ volatile uint32_t link_byte_n = 0;   // нийт ирсэн байт (утас/b
 volatile uint32_t link_pkt    = 0;   // бүрэн задарсан багц (framing шалгах)
 volatile uint32_t link_ms     = 0;   // сүүлийн БАГЦ ирсэн агшин (хуучирсныг мэдэх)
 
+/* ---- PCB1-ээс GRAB команд [0xC1][0xC2][0x0A] (PS5-тэй нэг шугам) --------- */
+volatile uint8_t  grab_request   = 0;  // 1 = PCB1 grab хүслээ (Tactic_Task боловсруулна)
+static   uint8_t  grab_cmd_state = 0;  // командын задлагчийн төлөв
+
+/* ---- PCB1-ээс QUERY команд [0xC3][block][0x0A] — "энд grab уу?" --------- */
+volatile uint8_t  query_request   = 0; // 1 = PCB1 асуув (Tactic_Task хариулна)
+volatile uint8_t  query_block     = 0; // асуусан блок (1..12)
+static   uint8_t  query_cmd_state = 0;
+static   uint8_t  query_block_tmp = 0;
+
 /* -----------------------------------------------------------------------------
  *  HAL_UART_RxCpltCallback — ESP32-оос ирсэн PS5 багцыг задлах (huart3, 1 байт/удаа)
  *
@@ -170,22 +180,38 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart == &huart3)
   {
-    /* --- ЭНЭ САМБАРЫН ӨӨРИЙН PS5 (ESP32 → USART3) — ҮНДСЭН ЭХ СУРВАЛЖ --- */
-    ps5_feed(data);
+    /* --- ЭНЭ САМБАРЫН ESP32 (USART3) — ОДОО АШИГЛАХГҮЙ ---
+     *  PS5 удирдлага PCB1-ээс USART2-оор ирдэг. Тактик нь PCB1-ийн joystick-аар
+     *  (control_data) энэ самбарт засагдаж, route-ыг USART2 TX-ээр PCB1 руу
+     *  буцаадаг. huart3-ыг зөвхөн соруулж (drain) дахин зэвсэглэнэ.               */
     HAL_UART_Receive_IT(&huart3, &data, 1);
   }
   else if (huart == &huart2)
   {
-    /* --- 1-р PCB-ээс ирэх урсгал (USART2, PA3) ---
-     *  ⚠ ps5_feed рүү ОРУУЛАХГҮЙ. Энэ самбар одоо ӨӨРИЙН PS5-тай болсон тул
-     *    хоёр эх сурвалж control_data-г зэрэг бичвэл хоорондоо зөрөлдөж, аль
-     *    нь сүүлд ирснээс хамаарч удирдлага "чичирнэ". Нэг л эзэн байх ёстой.
+    /* --- 1-р PCB-ээс ирэх PS5 багц (USART2, PA3) — ҮНДСЭН УДИРДЛАГА ---
+     *  PCB1 нь ESP32-оос ирсэн 23 байтыг ЯГ ТЭР ХЭВЭЭР нь дамжуулдаг тул ижил
+     *  задлагчаар (ps5_feed) шууд control_data-д хийж болно — формат хэзээ ч
+     *  зөрөхгүй. Ингэснээр PCB2_Manual (case 0) энэ control_data-г уншиж
+     *  моторуудаа хөдөлгөнө.
      *
-     *  Байтыг зөвхөн ТООЛНО — Link_Recv_Test-ийн оношилгоо ажилласаар байна.
-     *  PCB1 нь дамжуулсаар байгаа (хожим самбар хоорондын тушаалд хэрэг болно);
-     *  энд түүнийг зүгээр л хэрэглэхгүй.
-     *
-     *  Receive_IT-ийг ДАХИН зэвсэглэхгүй бол ганц байт аваад чимээгүй болно.  */
+     *  link_byte_n — түүхий байт тоологч (утас/baud шалгах); link_pkt-ыг
+     *  ps5_feed бүрэн багц бүрдэхэд өсгөнө.                                    */
+
+    /* GRAB команд [0xC1][0xC2][0x0A]-ыг ялгах (PS5 багцууд хооронд ирнэ) */
+    switch (grab_cmd_state) {
+      case 0:  grab_cmd_state = (link_byte == 0xC1) ? 1 : 0; break;
+      case 1:  grab_cmd_state = (link_byte == 0xC2) ? 2 : (link_byte == 0xC1 ? 1 : 0); break;
+      default: if (link_byte == 0x0A) grab_request = 1; grab_cmd_state = 0; break;
+    }
+
+    /* QUERY команд [0xC3][block][0x0A] — "энэ блок дээр grab уу?" */
+    switch (query_cmd_state) {
+      case 0:  query_cmd_state = (link_byte == 0xC3) ? 1 : 0; break;
+      case 1:  query_block_tmp = link_byte; query_cmd_state = 2; break;
+      default: if (link_byte == 0x0A) { query_block = query_block_tmp; query_request = 1; } query_cmd_state = 0; break;
+    }
+
+    ps5_feed(link_byte);
     link_byte_n++;
     link_ms = HAL_GetTick();
     HAL_UART_Receive_IT(&huart2, &link_byte, 1);
@@ -227,7 +253,7 @@ int main(void)
   /* USER CODE END Init */
 
   /* Configure the system clock */
-  SystemClock_Config();
+  SystemClock_Config(); 
 
   /* USER CODE BEGIN SysInit */
 
@@ -249,10 +275,6 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   generalInit();
-
-  /* Серво эхлэлийн байрлал (180°). generalInit нь PWM сувгийг асаадаг ч
-     өнцөг бичдэггүй — энэгүйгээр серво асахдаа хаана байснаа тэндээ үлдэнэ. */
-  Servo_Home();
 
   /* USART2 (PA3) — 1-р PCB-ээс өгөгдөл хүлээж эхлэх. generalInit нь зөвхөн
      huart3-ыг (PS5/ESP32) зэвсэглэдэг тул үүнийг энд тусад нь хийнэ.      */

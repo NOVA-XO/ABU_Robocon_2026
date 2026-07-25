@@ -103,6 +103,7 @@ void Gyro_ZeroYaw(void) {
 #define LPMS_RX_BUF  256
 static uint8_t  lpms_rx_buf[LPMS_RX_BUF];
 static uint16_t lpms_rd = 0;     // унших байрлал (DMA-ийн бичих байрлалыг NDTR-ээс авна)
+static uint8_t  lpms_started = 0;  // DMA асаасан эсэх (LPMS_Init хийгээгүй бол LPMS_Read = no-op)
 DMA_HandleTypeDef hdma_uart4_rx;
 
 static void LPMS_DMA_Start(void) {
@@ -127,6 +128,7 @@ static void LPMS_DMA_Start(void) {
 
     lpms_rd = 0;
     HAL_UART_Receive_DMA(&huart4, lpms_rx_buf, LPMS_RX_BUF);
+    lpms_started = 1;
 }
 
 /* DMA1 Stream2 тасалдал — HAL-ийн төлөвийг хөтлөхөд шаардлагатай */
@@ -160,7 +162,7 @@ void LPMS_Init(void) {
     // Stream горимд оруулах
     HAL_UART_Transmit(&huart4, Packet_Stream, sizeof(Packet_Stream), 100);
 
-    while (HAL_UART_Receive(&huart4, &dummy, 1, 5) == HAL_OK) { }
+    while (HAL_UART_Receive(&huart4, &dummy, 1, 5) == HAL_OK) { } 
 
     // ЭНЭ ЦЭГЭЭС хойш RX-ийг DMA хийнэ — байт алдагдахгүй.
     // (Дээрх полинг уншилтууд DMA асахаас ӨМНӨ дуусах ёстой.)
@@ -271,6 +273,8 @@ static uint8_t lpms_feed(uint8_t rx_byte) {
  * -----------------------------------------------------------------------------
  */
 uint8_t LPMS_Read(void) {
+    if (!lpms_started) return 0;   // LPMS_Init хийгээгүй → DMA байхгүй тул no-op
+                                   //   (эс тэгвээс NDTR=0 → хязгааргүй давталт → гацна)
     uint8_t got = 0;
     uint8_t b;
 

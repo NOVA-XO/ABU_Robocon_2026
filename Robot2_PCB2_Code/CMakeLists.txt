@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${CMAKE_SOURCE_DIR}/Core/Src/general.c
     ${CMAKE_SOURCE_DIR}/Core/Src/default.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/tactic.c
     ${CMAKE_SOURCE_DIR}/Core/Src/pca9685.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ssd1306.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ssd1306_fonts.c

@@ -123,8 +123,8 @@ void controlServo(bool isServo, int angle)
  */
 static const char *const mode_name[] = {
     "RUN blue",         //  0  автомат дараалал
-    "Joystick",         //  1
-    "Encoder",          //  2
+    "Auto climb",       //  1  PCB2 route (USART2)-оор climb_1/2/3 автоматаар (PCB2 мод 1-тэй)
+    "Grab strafe",      //  2  PCB2 мод 2 (Grab test)-тэй ХАМТ: 0xB7 дагаж strafe
     "Sensor v1-v8",     //  3
     "Motor",            //  4
     "Solenoid",         //  5
@@ -141,6 +141,10 @@ static const char *const mode_name[] = {
     "Link fwd status",  // 16  USART2 (PA2) — PS5-ийг PCB2 руу дамжуулах статус
     "MANUAL climb",     // 17  стик→runner  +  L1/R1/L2/R2/△/✕→рак
     "WEAPON test",      // 18  стик→runner, L1..R2→рак, △→серво, D-Up→соленоид1
+    "Strafe LR test",   // 19  рак 600 + ✕→1сек зүүн/1сек баруун (gyro)
+    "Encoder",          // 20  encoder статус (өмнө нь мод 2)
+    "Rack solo test",   // 21  △/✕ front, ○/▭ back дээш/доош (соло) + UART4 serial
+    "Joystick",         // 22  joystick тест (өмнө нь мод 1)
 };
 #define MODE_COUNT  ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
 
@@ -164,7 +168,7 @@ void selectMode(void)
 {
     static bool flag = false;
     int mode = 0;
-
+    
     /* ---- Горим гүйлгэх (сонгох товч дарагдтал) ---- */
     while (control_data[4][1] == 0) {
 
@@ -201,11 +205,12 @@ void selectMode(void)
     case 0:                                  // автомат: цэнхэр тал
         while (true) { weapon_blue(); }      // дотроо Rack_Fault шалгана
 
-    case 1:
-        while (true) { test_joyStick(); }
+    case 1:                              // PCB2 route (USART2)-оор автомат climb 1/2/3
+        while (true) { mode_check_rack(); auto_climb(); }
 
-    case 2:
-        while (true) { showEncoderStatus(); }
+    case 2:                              // PCB2 мод 2 (Grab test)-тэй ХАМТ: 0xB7 дагаж strafe
+        Set_Yaw_Anchor();                // эхлэхэд "урагш" чигийг тогтооно
+        while (true) { Grab_Strafe_Test(); }
 
     case 3:
         while (true) { test_sensor(); }
@@ -234,20 +239,26 @@ void selectMode(void)
     case 11:                                 // зөвхөн гарын жолоо
         while (true) { LPMS_Read(); runner(); }
 
+    /* climb 1/2/3: блокуудын урагш явалт нь одоо Drive_Straight (gyro) — эхлэхэд
+       одоогийн чигийг anchor болгоно ("урагш" = climb эхэлсэн чиг).           */
     case 12:
+        Set_Yaw_Anchor();
         while (true) { mode_check_rack(); climb_1_function(); }
 
     case 13:
+        Set_Yaw_Anchor();
         while (true) { mode_check_rack(); climb_2_function(); }
 
     case 14:
+        Set_Yaw_Anchor();
         while (true) { mode_check_rack(); climb_3_function(); }
 
     case 15:
-        /* ⚠ UART4-ийг LPMS эзэлсэн. Энэ горимыг ашиглах бол main.c-д
-           LPMS_Init()-ийг тайлбар болгож унтраах ёстой — эс тэгвээс хоёр
-           протокол нэг шугам дээр холилдож хоёул ажиллахгүй.            */
-        while (true) { Rack_Telemetry_Serial(); }
+        /* РАК preset: L1→0  L2→900  R1→1350  R2→1950. Rack_Service (TIM7 ISR)
+           байрлалд барина. ⚠ Serial (Rack_Telemetry_Serial) ХАССАН — рак тааруулга
+           дуусаж LPMS gyro UART4-ийг эзэлсэн (зөрчихөөс сэргийлэв). Дахин serial
+           хэрэгтэй бол main.c-д LPMS_Init-ийг түр comment болгоно.               */
+        while (true) { mode_check_rack(); Rack_Preset_Control(); }
 
     case 16:                                 // дамжуулалт нь ISR-т автоматаар явна
         while (true) { Link_Status_Test(); }
@@ -261,6 +272,19 @@ void selectMode(void)
 
     case 18:
         while (true) { test_weapon(); }   // дотроо Rack_Fault шалгана
+
+    case 19:                              // рак 600 + ✕→зүүн/баруун (gyro)
+        while (true) { mode_check_rack(); Gyro_Strafe_Test(); }
+
+    case 20:                              // encoder статус (өмнө нь мод 2 байсан)
+        while (true) { showEncoderStatus(); }
+
+    case 21:                              // СОЛО рак тест (△/✕ front, ○/▭ back) + serial
+        // mode_check_rack: switch хүрэхгүй гацвал (home хүрээгүй) timeout → зогсооно.
+        while (true) { mode_check_rack(); Rack_Solo_Test(); }
+
+    case 22:                              // joystick тест (өмнө нь мод 1)
+        while (true) { test_joyStick(); }
 
     default:
         while (true) { }

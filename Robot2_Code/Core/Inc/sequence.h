@@ -39,4 +39,10 @@ void    climb_2_reset(void);
 uint8_t climb_3_function(void);   // ЗАМ 3: up_40 ×1 → up_20 ×1 → down_20 ×3
 void    climb_3_reset(void);
 
+/* ---- AUTO CLIMB: PCB2-оос ирсэн route (g_route)-оор climb_1/2/3 сонгоно --- */
+void    auto_climb(void);         // route латчилж, тэр замын climb-ыг дуустал явна
+
+/* ---- GRAB STRAFE TEST: PCB2-ийн "Grab test" (мод 13)-тэй хамт (PCB1 strafe) - */
+void    Grab_Strafe_Test(void);   // PCB2-оос ирэх 0xB7 команд дагаж зүүн/баруун strafe
+
 #endif /* INC_SEQUENCE_H_ */
