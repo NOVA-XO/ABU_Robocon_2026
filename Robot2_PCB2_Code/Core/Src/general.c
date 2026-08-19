@@ -435,9 +435,9 @@ void Link_Recv_Test(void) {
  *  control_data-г дүүргэдэг (main.c үз). Тиймээс доорх бүх товч/стик PCB1-ийн
  *  дамжуулсан утгаас уншигдана.
  *
- *  МОТОР (товч дарж байхад эргэнэ, тавихад зогсоно):
- *    D-Up  → мотор 6 (+)      D-Down  → мотор 6 (−)
- *    D-Left → мотор 5 (+)     D-Right → мотор 5 (−)
+ *  МОТОР (JOYSTICK jog — стик хазайлгахад эргэнэ, тавихад зогсоно):
+ *    Зүүн стик Y  → мотор 5 (sun gear)
+ *    Баруун стик Y → мотор 6 (moon gear)
  *
  *  СОЛЕНОИД (нэг даралт = toggle, debounce):
  *    ▭ → 1    ○ → 2    △ → 5
@@ -449,20 +449,6 @@ void Link_Recv_Test(void) {
 /* Товч дарж байхад мотор эргэх тогтмол PWM (мотор бүрт тусад нь тааруул) */
 #define PCB2_M5_PWM 1000 // D-Left (+) / D-Right (−)
 #define PCB2_M6_PWM 1000 // D-Up   (+) / D-Down  (−)
-
-/* -----------------------------------------------------------------------------
- *  hold_axis — хоёр товчийг нэг тэнхлэг болгох (дарж байхад эргэнэ)
- *    Хоёуланг нь ЗЭРЭГ дарвал 0. Debounce хэрэггүй: тогтмол PWM тул түүхий
- *    хэлбэлзэл нэг л loop-д мотор бага зэрэг цохих төдий.
- * -----------------------------------------------------------------------------
- */
-static int hold_axis(uint8_t pos, uint8_t neg, int pwm) {
-  if (pos && !neg)
-    return pwm;
-  if (neg && !pos)
-    return -pwm;
-  return 0;
-}
 
 void PCB2_Manual(void) {
   static Btn_t bs[3] = {0};    // соленоид 1,2,5-ийн rising-edge мэдэгч
@@ -476,16 +462,12 @@ void PCB2_Manual(void) {
     inited = 1;
   }
 
-  /* --- Мотор: ТОВЧ дарж байхад эргэнэ ---
-   *   control_data[2]: [0]=D-Down [1]=D-Right [2]=D-Up [3]=D-Left
-   *   D-Up  → M6 (+)    D-Down  → M6 (−)
-   *   D-Left → M5 (+)   D-Right → M5 (−)                                   */
-  int m6 = hold_axis((uint8_t)control_data[2][2], // D-Up   (+)
-                     (uint8_t)control_data[2][0], // D-Down (−)
-                     PCB2_M6_PWM);
-  int m5 = hold_axis((uint8_t)control_data[2][3], // D-Left  (+)
-                     (uint8_t)control_data[2][1], // D-Right (−)
-                     PCB2_M5_PWM);
+  /* --- Мотор: JOYSTICK-оор (jog) ---
+   *   Зүүн стик Y  (control_data[0][1]) → M5 (sun gear)
+   *   Баруун стик Y (control_data[0][3]) → M6 (moon gear)
+   *   стик ±100 → ±PWM.  Чиглэл буруу бол PWM #define-ийн тэмдгийг эргүүл.     */
+  int m5 = applyDeadzone(control_data[0][1]) * PCB2_M5_PWM / 100; // sun
+  int m6 = applyDeadzone(control_data[0][3]) * PCB2_M6_PWM / 100; // moon
   motor_control(5, m5);
   motor_control(6, m6);
 
@@ -691,8 +673,11 @@ static int moon_hold(int target) {
   int a = err < 0 ? -err : err;
   if (a <= MOON_HOLD_DB) {
     integ = 0.0f;
-    return 0;
-  } // тэвчих бүс — зогс, integ ТЭГЛЭ (windup/чичрэлт зогсооно)
+    /* Тэвчих бүс: P-ийг зогсоохын оронд ЗӨӨЛӨН P-hold өгнө (MIN-гүй) — мотор
+       бүрэн УНТРАХГҮЙ. Робот хөдлөх динамик доргионд moon-ийг идэвхтэй барьж,
+       чөлөөт дрифтийг сэргийлнэ. err=0 үед 0 (target дээр чичрэлтгүй). */
+    return MOON_HOLD_KP * err; // ±(KP*DB) хүрэхгүй жижиг барих хүч
+  }
   integ += (float)err * MOON_HOLD_KI; // integral хураах
   if (integ > (float)MOON_HOLD_IMAX)
     integ = (float)MOON_HOLD_IMAX; // anti-windup
@@ -1160,6 +1145,28 @@ uint8_t Grab_Service(void) {
 }
 
 /* =============================================================================
+ *  tictactoe (PCB2) — PCB1-ийн tictactoe маневрын PCB2-тал.
+ *    Алхам 1: solenoid 5 ON.  (Дараагийн алхмуудыг ЭНД нэмнэ.)
+ *    Non-blocking: давталт бүрд дуудна.  1 = дуусав.
+ * =============================================================================
+ */
+static uint8_t ttt2_st = 0;
+
+void tictactoe_reset(void) { ttt2_st = 0; }
+
+uint8_t tictactoe(void) {
+  switch (ttt2_st) {
+  case 0: // solenoid 5 ON
+    controlSolenoid(5, true);
+    ttt2_st = 1;
+    break;
+  default: // 1 = дуусав (дараагийн алхмуудыг ЭНД нэмнэ)
+    return 1;
+  }
+  return 0;
+}
+
+/* =============================================================================
  *  Grab_Test — шоо-авах БҮТЭН дарааллыг ТУСДАА турших (strafe-ТЭЙ, PCB1-тэй
  * ХАМТ). △ → Grab_Start (дараалал эхлүүлнэ),  ✕ → таслах/reset. Grab_Service
  * бүтэн ажиллана: sun−90 → sol1+5 → moon120 → ЗҮҮН strafe (PCB1 руу 0xB7
@@ -1168,9 +1175,9 @@ uint8_t Grab_Service(void) {
  * =============================================================================
  */
 void Grab_Test(void) {
-  static Btn_t bF = {0}, bB = {0}, breset = {0};
+  static Btn_t bF = {0}, bB = {0}, bU = {0}, bUb = {0}, breset = {0}, bTTT = {0};
   static uint8_t active = 0,
-                 done = 0; // 0=none 1=front_down_20_f 2=front_down_20_b
+                 done = 0; // 0=none 1=fd20_f 2=fd20_b 3=fu20_f 4=fu20_b 5=tictactoe
   static uint8_t inited = 0;
 
   if (!inited) {
@@ -1191,6 +1198,25 @@ void Grab_Test(void) {
     active = 2;
     done = 0;
   }
+  /* □ → grab_front_up_20_f (урд харсан, шоо ДЭЭР) */
+  if (btn_rising(&bU, (uint8_t)control_data[1][1])) {
+    grab_front_up_20_f_reset();
+    active = 3;
+    done = 0;
+  }
+  /* D-Down → grab_front_up_20_b (ард харсан, шоо ДЭЭР).  D-Up нь PCB1
+   * байрлалтад. */
+  if (btn_rising(&bUb, (uint8_t)control_data[2][0])) {
+    grab_front_up_20_b_reset();
+    active = 4;
+    done = 0;
+  }
+  /* D-Right → tictactoe (PCB2 тал: sol5 ON) */
+  if (btn_rising(&bTTT, (uint8_t)control_data[2][1])) {
+    tictactoe_reset();
+    active = 5;
+    done = 0;
+  }
   /* ✕ → зогсоох: соленоид унтрааж, мотор зогсоох (P-hold-ыг таслана) */
   if (btn_rising(&breset, (uint8_t)control_data[1][0])) {
     controlSolenoid(1, false);
@@ -1205,16 +1231,27 @@ void Grab_Test(void) {
     done = grab_front_down_20_f();
   else if (active == 2)
     done = grab_front_down_20_b();
+  else if (active == 3)
+    done = grab_front_up_20_f();
+  else if (active == 4)
+    done = grab_front_up_20_b();
+  else if (active == 5)
+    done = tictactoe();
 
   static uint32_t to = 0;
   if (HAL_GetTick() - to >= 100) {
     to = HAL_GetTick();
     colorFill(Black);
     setCursor(2, 2);
-    printStr("GRAB FD20 %s", active == 2 ? "b" : "f");
-    setCursor(2, 22);
+    printStr("GRAB %s", active == 4   ? "FU20 b"
+                        : active == 3 ? "FU20 f"
+                        : active == 2 ? "FD20 b"
+                                      : "FD20 f");
+    setCursor(2, 18);
     printStr("S:%d M:%d", counter[0], counter[1]);
-    setCursor(2, 42);
+    setCursor(2, 34);
+    printStr("v3:%d v4:%d", (int)val3, (int)val4);
+    setCursor(2, 50);
     printStr("%s", !active ? "idle" : done ? "DONE hold" : "RUN");
     setScreen();
   }
@@ -1235,8 +1272,230 @@ void Grab_Test(void) {
  * бичиж турших.
  * =============================================================================
  */
-uint8_t grab_front_up_20_f(void) { /* TODO */ return 1; }
-uint8_t grab_front_up_20_b(void) { /* TODO */ return 1; }
+/* grab_front_up_20_f — УРД талын scroll 20см ДЭЭР, sun УРД харсан.
+ *   PCB1 нь up_20_function-оор (drive → рак 1000 → val7 хүртэл урагш) роботыг
+ *   байрлуулсны ДАРАА PCB2 энэ грабыг ажиллуулна.
+ *   sun −90 → moon 120 → [дараагийн алхмуудыг нэмнэ].
+ *   _reset()-ээр эхлүүлж non-blocking.  ⚠ Одоохондоо ДУУСаагүй (0 буцаана). */
+static uint8_t gfu20f_st = 0; // 0=idle 1=sun−90 2=moon100 3=strafe 4=strafe+500
+                              // 5=moon→125/val5-limit 6=sol1off+1s 7=wait
+                              // 8=moon0→sun90 9=sol5off 10=дуусав
+static int gfu20f_sun = 0;
+static int gfu20f_moon = 0;
+static uint32_t gfu20f_t0 = 0; // strafe timeout таймер
+static uint32_t gfu20f_tx = 0; // strafe команд давтан илгээх таймер
+
+void grab_front_up_20_f_reset(void) {
+  controlSolenoid(1, false); // цэвэр эхлэл
+  controlSolenoid(5, false);
+  gfu20f_sun = sun_deg_to_cnt(GRAB_SUN_DEG); // −90 (урд харах)
+  gfu20f_moon = counter[1];                  // одоо байрлалдаа
+  gfu20f_st = 1;
+}
+
+uint8_t grab_front_up_20_f(void) {
+  switch (gfu20f_st) {
+  case 1: // sun −90 хүрэх → sol5+sol1 ON, moon 100
+    if (sun_reached(gfu20f_sun)) {
+      controlSolenoid(5, true);
+      controlSolenoid(1, true);
+      gfu20f_moon = 110;
+      gfu20f_st = 2;
+    }
+    break;
+  case 2: // moon 100 тогтсон → ЗҮҮН strafe эхлүүл
+    if (grab_moon_settled(gfu20f_moon)) {
+      gfu20f_t0 = HAL_GetTick();
+      gfu20f_tx = 0;
+      gfu20f_st = 3;
+    }
+    break;
+  case 3: // ЗҮҮН strafe (PCB1) — val1 && val2 болтол ХАЙХ
+    if (HAL_GetTick() - gfu20f_tx >= GRAB_STRAFE_TX_MS) {
+      send_strafe_cmd(GRAB_STRAFE_LEFT);
+      gfu20f_tx = HAL_GetTick();
+    }
+    if ((val1 == 1 && val2 == 1) ||
+        HAL_GetTick() - gfu20f_t0 >= GRAB_STRAFE_TIMEOUT) {
+      gfu20f_t0 = HAL_GetTick(); // val хангагдлаа → НЭМЖ 500ms зүүн явна
+      gfu20f_tx = 0;
+      gfu20f_st = 4;
+    }
+    break;
+  case 4: // +500ms НЭМЖ зүүн яваад зогс → moon 120 (грип, доош)
+    if (HAL_GetTick() - gfu20f_tx >= GRAB_STRAFE_TX_MS) {
+      send_strafe_cmd(GRAB_STRAFE_LEFT);
+      gfu20f_tx = HAL_GetTick();
+    }
+    if (HAL_GetTick() - gfu20f_t0 >= GRAB_STRAFE_EXTRA_MS) {
+      send_strafe_cmd(GRAB_STRAFE_STOP); // зогс (2 удаа — найдвартай)
+      send_strafe_cmd(GRAB_STRAFE_STOP);
+      gfu20f_moon = 125; // грип байрлал
+      gfu20f_st = 5;
+    }
+    break;
+  case 5: // moon → 125 руу явах ЗУУР val5 (limit switch — scroll дээр дарагдана)
+          // шалгана: val5==0 (scroll дарав) бол ТЭР байрлалд зогсоож grip хийж,
+          // шууд дараагийн үйлдэл рүү. Эс бол 125-д хүрч (settled) grip хийнэ.
+    if (val5 == 0) {              // limit дарагдав → scroll атгагдав (over-close үгүй)
+      gfu20f_moon = counter[1];   // ОДООГИЙН байрлалд зогсоож барь
+      gfu20f_t0 = HAL_GetTick();
+      gfu20f_st = 6;
+    } else if (grab_moon_settled(gfu20f_moon)) { // 125-д хүрэв (val5 дарагдаагүй)
+      gfu20f_t0 = HAL_GetTick();
+      gfu20f_st = 6;
+    }
+    break;
+  case 6: // 500ms → sol1 OFF → 1сек хүлээ (sol5 хэвээр ON)
+    if (HAL_GetTick() - gfu20f_t0 >= GRAB_MOON_B_WAIT_MS) {
+      controlSolenoid(1, false);
+      gfu20f_t0 = HAL_GetTick();
+      gfu20f_st = 7;
+    }
+    break;
+  case 7: // 1сек → moon 0 (ДЭЭШ буцах)
+    if (HAL_GetTick() - gfu20f_t0 >= GRAB_SOL_OFF_WAIT_MS) {
+      gfu20f_moon = GRAB_MOON_HOME; // 0
+      gfu20f_st = 8;
+    }
+    break;
+  case 8: // moon 0 тогтсон → sun +90 (дараагийн scroll руу эргэх)
+    if (grab_moon_settled(gfu20f_moon)) {
+      gfu20f_sun = sun_deg_to_cnt(90);
+      gfu20f_st = 9;
+    }
+    break;
+  case 9: // sun +90 тогтсон → sol5 OFF, дуусав
+    if (sun_reached(gfu20f_sun)) {
+      controlSolenoid(5, false);
+      gfu20f_st = 10;
+    }
+    break;
+  default:
+    break; // 0=idle, 10=дуусав
+  }
+  if (gfu20f_st != 0) { // эхэлсэн бол sun/moon-ыг P-hold-оор барина
+    int sp = sun_hold(gfu20f_sun) * SUN_DIR;
+    int mp = moon_hold(gfu20f_moon) * MOON_DIR;
+    motor_control(5, sp);
+    motor_control(6, mp);
+    sun_last_pwm = sp;
+    moon_last_pwm = mp;
+
+    static uint32_t gu_ts = 0;
+    if (HAL_GetTick() - gu_ts >= 50) {
+      gu_ts = HAL_GetTick();
+      char line[90];
+      int n = snprintf(
+          line, sizeof(line), "GU\tst%d\tMt%d\tMp%d\tSt%d\tv%d%d\n", gfu20f_st,
+          gfu20f_moon, counter[1], gfu20f_sun, (int)val1, (int)val2);
+      HAL_UART_Transmit(&huart4, (uint8_t *)line, (uint16_t)n, 20);
+    }
+  }
+  return (gfu20f_st == 10) ? 1 : 0;
+}
+/* grab_front_up_20_b — УРД талын scroll 20см ДЭЭР, sun АРД харсан (up_20_f-ийн
+ * ард). up_20_f-ийн back хувилбар (down_20_b шиг бүтэц): sun +90 → sol5+sol2
+ * ON, moon −100 → БАРУУН strafe (val3&val4) → +500ms → moon −120 грип → sol2
+ * OFF → moon 0 → sol5 OFF.  _reset()-ээр эхлүүлж non-blocking; дуусвал 1. */
+static uint8_t gfu20b_st = 0; // 0=idle 1=sun+90 2=moon−100 3=strafeR 4=+500
+                              // 5=moon−120 6=500ms→sol2off 7=moon0 8=дуусав
+static int gfu20b_sun = 0;
+static int gfu20b_moon = 0;
+static uint32_t gfu20b_t0 = 0;
+static uint32_t gfu20b_tx = 0;
+
+void grab_front_up_20_b_reset(void) {
+  controlSolenoid(1, false);       // front гар ТАВИНА (үлдэгдэл арилгах)
+  controlSolenoid(2, false);       // back грип цэвэр эхлэл
+  gfu20b_sun = sun_deg_to_cnt(90); // +90 (ард харах)
+  gfu20b_moon = counter[1];        // одоо байрлалдаа
+  gfu20b_st = 1;
+}
+
+uint8_t grab_front_up_20_b(void) {
+  switch (gfu20b_st) {
+  case 1: // sun +90 хүрэх → sol5+sol2 ON, moon −100
+    if (sun_reached(gfu20b_sun)) {
+      controlSolenoid(5, true);
+      controlSolenoid(2, true);
+      gfu20b_moon = -100;
+      gfu20b_st = 2;
+    }
+    break;
+  case 2: // moon −100 тогтсон → БАРУУН strafe эхлүүл
+    if (grab_moon_settled(gfu20b_moon)) {
+      gfu20b_t0 = HAL_GetTick();
+      gfu20b_tx = 0;
+      gfu20b_st = 3;
+    }
+    break;
+  case 3: // БАРУУН strafe — val3 && val4 болтол ХАЙХ
+    if (HAL_GetTick() - gfu20b_tx >= GRAB_STRAFE_TX_MS) {
+      send_strafe_cmd(GRAB_STRAFE_RIGHT);
+      gfu20b_tx = HAL_GetTick();
+    }
+    if ((val3 == 1 && val4 == 1) ||
+        HAL_GetTick() - gfu20b_t0 >= GRAB_STRAFE_TIMEOUT) {
+      gfu20b_t0 = HAL_GetTick(); // val хангагдлаа → НЭМЖ 500ms баруун
+      gfu20b_tx = 0;
+      gfu20b_st = 4;
+    }
+    break;
+  case 4: // +500ms НЭМЖ баруун → STOP, moon −120 (грип)
+    if (HAL_GetTick() - gfu20b_tx >= GRAB_STRAFE_TX_MS) {
+      send_strafe_cmd(GRAB_STRAFE_RIGHT);
+      gfu20b_tx = HAL_GetTick();
+    }
+    if (HAL_GetTick() - gfu20b_t0 >= GRAB_STRAFE_EXTRA_MS) {
+      send_strafe_cmd(GRAB_STRAFE_STOP);
+      send_strafe_cmd(GRAB_STRAFE_STOP);
+      gfu20b_moon = -125; // грип байрлал
+      gfu20b_st = 5;
+    }
+    break;
+  case 5: // moon −120 тогтсон → 500ms хүлээ (грип найдвартай атгах)
+    if (grab_moon_settled(gfu20b_moon)) {
+      gfu20b_t0 = HAL_GetTick();
+      gfu20b_st = 6;
+    }
+    break;
+  case 6: // 500ms → sol2 OFF (атгах), moon 0
+    if (HAL_GetTick() - gfu20b_t0 >= GRAB_MOON_B_WAIT_MS) {
+      controlSolenoid(2, false);
+      gfu20b_moon = GRAB_MOON_HOME; // 0
+      gfu20b_st = 7;
+    }
+    break;
+  case 7: // moon 0 тогтсон → sol5 OFF, дуусав
+    if (grab_moon_settled(gfu20b_moon)) {
+      controlSolenoid(5, false);
+      gfu20b_st = 8;
+    }
+    break;
+  default:
+    break; // 0=idle, 8=дуусав
+  }
+  if (gfu20b_st != 0) {
+    int sp = sun_hold(gfu20b_sun) * SUN_DIR;
+    int mp = moon_hold(gfu20b_moon) * MOON_DIR;
+    motor_control(5, sp);
+    motor_control(6, mp);
+    sun_last_pwm = sp;
+    moon_last_pwm = mp;
+
+    static uint32_t gub_ts = 0;
+    if (HAL_GetTick() - gub_ts >= 50) {
+      gub_ts = HAL_GetTick();
+      char line[90];
+      int n = snprintf(
+          line, sizeof(line), "GUB\tst%d\tMt%d\tMp%d\tSt%d\tv%d%d\n", gfu20b_st,
+          gfu20b_moon, counter[1], gfu20b_sun, (int)val3, (int)val4);
+      HAL_UART_Transmit(&huart4, (uint8_t *)line, (uint16_t)n, 20);
+    }
+  }
+  return (gfu20b_st == 8) ? 1 : 0;
+}
 /* grab_front_down_20_f — УРД талын scroll 20см ДООР, sun УРД харсан.
  *   sun−90 → sol1+5 ON → moon 130 → ЗҮҮН strafe хайх (val1&val2==1) →
  *   moon 140 + sol1 OFF (атгах) → moon буцах (0) + sol5 OFF (буцах явцад) →
@@ -1373,15 +1632,19 @@ uint8_t grab_front_down_20_f(void) {
  *   moon −130 → БАРУУН strafe (val3&val4==1) → moon −145 + sol2 OFF (атгах) →
  *   moon 0 → sol5 OFF → дуусав.  Strafe-ийг PCB1 хийнэ. Дуусвал 1. */
 static uint8_t gfd20b_st = 0; // 0=idle 1=sol/moon-130 2=moon-130 3=strafe-R
-                              // 4=moon-145 5=moon0 6=дуусав
+                              // 4=moon-145 5=sol2 OFF+500ms 6=moon0 7=дуусав
 static int gfd20b_sun = 0;
 static int gfd20b_moon = 0;
 static uint32_t gfd20b_t0 = 0;
 static uint32_t gfd20b_tx = 0;
+static uint8_t gfd20b_gripwait = 0; // st5: sol2 OFF-ийн дараах 500ms хүлээлт эхэлсэн эсэх
 
 void grab_front_down_20_b_reset(void) {
+  controlSolenoid(1, false);       // front гар ТАВИНА (_f-ийн үлдэгдэл арилгах)
+  controlSolenoid(2, false);       // back грип цэвэр эхлэл
+  gfd20b_gripwait = 0;             // грип-хүлээлтийн флаг цэвэрлэх
   gfd20b_sun = sun_deg_to_cnt(90); // +90 (_f-ээс аль хэдийн тэнд; эс бол хүрнэ)
-  gfd20b_moon = counter[1];        // одоо байрлалдаа (−130 хүртэл барина)
+  gfd20b_moon = counter[1];        // одоо байрлалдаа (−117 хүртэл барина)
   gfd20b_st = 1;
 }
 
@@ -1391,7 +1654,7 @@ uint8_t grab_front_down_20_b(void) {
     if (sun_reached(gfd20b_sun)) {
       controlSolenoid(5, true);
       controlSolenoid(2, true);
-      gfd20b_moon = -130;
+      gfd20b_moon = -112;
       gfd20b_st = 2;
     }
     break;
@@ -1404,37 +1667,58 @@ uint8_t grab_front_down_20_b(void) {
     }
     break;
 
-  case 3: // БАРУУН strafe (PCB1) — val3(PNP тул УРВУУ)==0 && val4==1 болтол ХАЙХ
+  case 3: // БАРУУН strafe (PCB1) — val3==1 && val4==1 (хоёул энгийн мэдрэгч)
+          // болтол ХАЙХ
     if (HAL_GetTick() - gfd20b_tx >= GRAB_STRAFE_TX_MS) {
       send_strafe_cmd(GRAB_STRAFE_RIGHT);
       gfd20b_tx = HAL_GetTick();
     }
-    if ((val3 == 0 && val4 == 1) || // ⚠ val3 PNP — 0=мэдэрсэн (бусад мэдрэгчийн эсрэг)
+    if ((val3 == 1 &&
+         val4 ==
+             1) || // val3/val4 хоёул ЭНГИЙН мэдрэгч (1=мэдэрсэн; PNP солигдсон)
         HAL_GetTick() - gfd20b_t0 >= GRAB_STRAFE_TIMEOUT) {
-      send_strafe_cmd(GRAB_STRAFE_STOP);
-      send_strafe_cmd(GRAB_STRAFE_STOP);
-      gfd20b_moon = -145; // грип байрлал
+      gfd20b_t0 = HAL_GetTick(); // val хангагдлаа → НЭМЖ 500ms баруун явна
+      gfd20b_tx = 0;
       gfd20b_st = 4;
     }
     break;
 
-  case 4: // moon −145 тогтсон → sol2 OFF (атгах), moon 0
-    if (grab_moon_settled(gfd20b_moon)) {
-      controlSolenoid(2, false);    // sol2 OFF — атгах
-      gfd20b_moon = GRAB_MOON_HOME; // moon 0 (буцах)
+  case 4: // val хангагдсан ч 500ms НЭМЖ баруун яваад зогс → moon −145
+    if (HAL_GetTick() - gfd20b_tx >= GRAB_STRAFE_TX_MS) {
+      send_strafe_cmd(GRAB_STRAFE_RIGHT);
+      gfd20b_tx = HAL_GetTick();
+    }
+    if (HAL_GetTick() - gfd20b_t0 >= GRAB_STRAFE_EXTRA_MS) {
+      send_strafe_cmd(GRAB_STRAFE_STOP); // зогс (2 удаа — найдвартай)
+      send_strafe_cmd(GRAB_STRAFE_STOP);
+      gfd20b_moon = -140; // грип байрлал
       gfd20b_st = 5;
     }
     break;
 
-  case 5: // moon 0 тогтсон → sol5 OFF, дуусав
-    if (grab_moon_settled(gfd20b_moon)) {
-      controlSolenoid(5, false);
+  case 5: // moon −145 тогтсон → sol2 OFF (атгах) → 500ms хүлээ → moon 0
+    if (!gfd20b_gripwait) {
+      if (grab_moon_settled(gfd20b_moon)) {
+        controlSolenoid(2, false); // sol2 OFF — атгах (грип суух)
+        gfd20b_t0 = HAL_GetTick(); // 500ms хүлээлт эхлүүл (механик суух хугацаа)
+        gfd20b_gripwait = 1;
+      }
+    } else if (HAL_GetTick() - gfd20b_t0 >= 500) {
+      gfd20b_moon = GRAB_MOON_HOME; // moon 0 (буцах) — 500ms хүлээсний ДАРАА
+      gfd20b_gripwait = 0;
       gfd20b_st = 6;
     }
     break;
 
+  case 6: // moon 0 тогтсон → sol5 OFF, дуусав
+    if (grab_moon_settled(gfd20b_moon)) {
+      controlSolenoid(5, false);
+      gfd20b_st = 7;
+    }
+    break;
+
   default:
-    break; // 0=idle, 6=дуусав
+    break; // 0=idle, 7=дуусав
   }
   if (gfd20b_st != 0) {
     int sp = sun_hold(gfd20b_sun) * SUN_DIR;
@@ -1455,7 +1739,7 @@ uint8_t grab_front_down_20_b(void) {
       HAL_UART_Transmit(&huart4, (uint8_t *)line, (uint16_t)n, 20);
     }
   }
-  return (gfd20b_st == 6) ? 1 : 0;
+  return (gfd20b_st == 7) ? 1 : 0;
 }
 uint8_t grab_left_up_20_f(void) { /* TODO */ return 1; }
 uint8_t grab_left_up_20_b(void) { /* TODO */ return 1; }

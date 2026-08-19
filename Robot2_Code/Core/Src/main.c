@@ -257,13 +257,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
  *  Link_Send_Grab — PCB2 руу "GRAB эхлүүл" команд (USART2 TX, PS5-тэй нэг
  * шугам)
  *
- *  Багц: [0xC1][0xC2][0x0A] — давхар magic (0xC1,0xC2) нь PS5 урсгалтай
- *  санамсаргүй давхцахаас сэргийлнэ. PCB2 үүнийг ялгаж, solenoid 5-ыг асаана.
+ *  Багц: [0xC1][0xC2][type][0x0A] — давхар magic (0xC1,0xC2) нь PS5 урсгалтай
+ *  санамсаргүй давхцахаас сэргийлнэ.  type: 0 = down_20, 1 = up_20 (платформ).
+ *  PCB2 үүнийг ялгаж, төрөл + f/b тоологчоор аль грабыг ажиллуулахаа сонгоно.
  *  Forwarding идэвхтэй (gState=BUSY_TX) бол HAL_BUSY → чимээгүй алгасана;
  *  auto_climb grab-ийн хүлээх төлөвт давтан илгээдэг тул нэг нь хүрнэ. */
-void Link_Send_Grab(void) {
-  uint8_t pkt[3] = {0xC1, 0xC2, 0x0A};
-  HAL_UART_Transmit(&huart2, pkt, 3, 5);
+void Link_Send_Grab(uint8_t type) {
+  uint8_t pkt[4] = {0xC1, 0xC2, type, 0x0A};
+  HAL_UART_Transmit(&huart2, pkt, 4, 5);
 }
 
 /* -----------------------------------------------------------------------------
@@ -296,12 +297,13 @@ int main(void) {
 
   /* USER CODE BEGIN 1 */
 
-  /* USER CODE E ND 1 */
+  /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the  Flash interface and the Systick.
    */
+
   HAL_Init();
 
   /* USER CODE BEGIN Init */

@@ -63,7 +63,9 @@ void    Grab_Test(void);              // шоо-авах механизмыг Т
 /* ---- ШОО-АВАХ 14 COMBINATION (7 тохиолдол × sun 180° урд/ард; _f=урд _b=ард) --
  *   non-blocking: дуусвал 1. Одоохондоо ХООСОН (TODO). Эхлээд front-ыг бичнэ.   */
 uint8_t grab_front_up_20_f(void);
+void    grab_front_up_20_f_reset(void);   // дараалал эхлүүлэх (Grab_Test дуудна)
 uint8_t grab_front_up_20_b(void);
+void    grab_front_up_20_b_reset(void);   // дараалал эхлүүлэх (Grab_Test дуудна)
 uint8_t grab_front_down_20_f(void);
 void    grab_front_down_20_f_reset(void); // дараалал эхлүүлэх (Grab_Test дуудна)
 uint8_t grab_front_down_20_b(void);

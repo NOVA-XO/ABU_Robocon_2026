@@ -57,8 +57,12 @@ extern int control_data[5][4];
 /* ---- USART2 (PA2 TX) — PCB1 руу route/ack илгээх ------------------------ */
 extern UART_HandleTypeDef huart2;
 
+/* ---- Encoder тоолуурууд (moon=counter[1], sun=counter[0]) — serial монитор -- */
+extern int counter[];
+
 /* ---- PCB1-ээс ирэх GRAB хүсэлт (main.c-ийн huart2 ISR тавина) ----------- */
 extern volatile uint8_t grab_request;
+extern volatile uint8_t grab_type;    // 0 = down_20, 1 = up_20 (платформ)
 
 /* ---- PCB1-ээс ирэх QUERY ("энэ блок дээр grab уу?") -------------------- */
 extern volatile uint8_t query_request;   // 1 = асуув
@@ -424,17 +428,17 @@ static void send_query_ans(uint8_t grab) {
 
 /* -----------------------------------------------------------------------------
  *  query_grab_decision — блок N дээр grab хийх үү (тактикаар)?
- *    Дүрэм: route дахь N-ийн ДАРААГИЙН блокт R2 scroll байвал энд бэлдэж grab.
- *      block N → row=(N-1)/3, col=(N-1)%3;  дараагийн блок = grid[row+1][col].
- *    (Хажуугийн багана/L-R сонголтыг хожим нэмж болно.)
+ *    Дүрэм: робот N дээр байхдаа ДАРААГИЙН (нэг мөр ДЭЭД) блок N+3-ийн scroll-ыг
+ *      авдаг тул grid[row+1][col]-ыг шалгана.  block N → row=(N-1)/3, col=(N-1)%3.
+ *    (Жишээ: block 7 дээрээс block 10-ийн scroll-ыг авна.)
  * -----------------------------------------------------------------------------
  */
 static uint8_t query_grab_decision(uint8_t block) {
     if (block < 1 || block > 12) return 0;
     uint8_t row = (uint8_t)((block - 1) / T_COLS);
     uint8_t col = (uint8_t)((block - 1) % T_COLS);
-    if (row + 1 >= T_ROWS) return 0;                 // сүүлийн мөр — дараагийн блок алга
-    return (grid[row + 1][col] == ST_R2) ? 1 : 0;
+    if (row + 1 >= T_ROWS) return 0;                  // сүүлийн мөр — дараагийн блок алга
+    return (grid[row + 1][col] == ST_R2) ? 1 : 0;     // ДАРААГИЙН (дээд) блокт scroll байвал grab
 }
 
 /* =============================================================================
@@ -460,29 +464,79 @@ void Tactic_Task(void) {
         inited = 1;
     }
 
-    /* --- PCB1-ээс GRAB ирвэл: ЗӨВХӨН front-down-20 грабыг ажиллуулна ---
-     *  grab_front_down_20_f (non-blocking) бүр давталтад дуудна; дуусмагц PCB1
-     *  руу "done" (0xB5). ЭРТ (мессежийн return-оос өмнө) дуудна — эс бөгөөс зогсоно.
-     *  ⚠ Одоохондоо нэг л төрлийн шоо (front-down-20) холбов.                    */
-    static uint8_t grabbing = 0;
+    /* --- PCB1-ээс GRAB ирвэл: НЭГ шоо авна (нэг платформ = нэг шоо) ---
+     *  Хоёр дахь шоо ДАРААХ платформ дээр (замд) тул нэг GRAB = нэг шоо, дуусмагц
+     *  PCB1 руу done (0xB5) → робот climb-оо үргэлжлүүлнэ.
+     *  Эхний GRAB → УРД гар (_f); дараагийнх → АРД гар (_b, урд гар дүүрсэн).
+     *  ⚠ Одоохондоо зөвхөн down_20. grab_n нь ТЭЖЭЭЛ унтартал хадгалагдана
+     *    (нэг матчид 0→1→2); дахин туршихад тэжээл унтрааж reset хий.            */
+    static uint8_t grabbing = 0; // 0=idle 1=running 2=done(сун/мун барьж хол)
+    static uint8_t grab_n = 0;   // хэдэн шоо авсан (эхнийх _f, дараагийнх _b)
+    static uint8_t use_back = 0; // энэ grab _b эсэх (front гар дүүрсэн)
+    static uint8_t use_up = 0;   // энэ grab up_20 эсэх (PCB1 GRAB төрлөөс)
+    static uint8_t grab_armed = 0; // ШИНЭ QUERY(yes) ирсэн үү — resend-ээс хамгаална
     if (grab_request) {
         grab_request = 0;
-        if (!grabbing) {
-            grab_front_down_20_f_reset();
+        /* Шинэ grab-ыг ЗӨВХӨН шинэ QUERY(yes)-ийн ДАРАА эхлүүлнэ. Ингэснээр өмнөх
+           grab дууссаны дараа (grabbing==2) ирэх ХУУЧИН GRAB resend-үүд (хуучин
+           төрөлтэй) спуриус grab эхлүүлэхгүй — эс бол block 7 нь block 4-ийн up
+           төрлийг дуурайж up_b болдог байв. */
+        if (grabbing != 1 && grab_armed) { // зэвсэглэсэн (шинэ QUERY yes) → шинэ grab
+            grab_armed = 0;           // энэ QUERY-г "хэрэглэв"
+            use_back = (grab_n >= 1); // эхний grab урд гар, дараагийнх ард гар
+            use_up   = grab_type;     // PCB1-ээс: 0=down_20 1=up_20
+            if (use_up) {
+                if (use_back) grab_front_up_20_b_reset();
+                else          grab_front_up_20_f_reset();
+            } else {
+                if (use_back) grab_front_down_20_b_reset();
+                else          grab_front_down_20_f_reset();
+            }
             grabbing = 1;
         }
     }
-    if (grabbing && grab_front_down_20_f()) { // дараалал дуусав → PCB1 руу ack
-        send_grab_done();
-        grabbing = 0;
-        grab_msg_ms = HAL_GetTick();
-        dirty = 1;
+    if (grabbing == 1) {
+        uint8_t gdone = use_up
+            ? (use_back ? grab_front_up_20_b()   : grab_front_up_20_f())
+            : (use_back ? grab_front_down_20_b() : grab_front_down_20_f());
+        if (gdone) { // дараалал дуусав → PCB1 руу ack, климб үргэлжилнэ
+            send_grab_done();
+            grabbing = 2; // ДУУСАВ — сун/мун-г БАРЬ (доор үз)
+            grab_n++;
+            grab_msg_ms = HAL_GetTick();
+            dirty = 1;
+        }
+    } else if (grabbing == 2) {
+        /* grab дууссан ч сун/мун-г ҮРГЭЛЖ барина — эс бол grab хооронд free болж
+           ачаатай гар унаж, дараагийн _b-ийн moon БУРУУ зүг эргэдэг байв.
+           st=done тул энэ дуудлага ЗӨВХӨН P-hold хийнэ (төлөв өөрчлөхгүй).   */
+        if (use_up) {
+            if (use_back) grab_front_up_20_b();   else grab_front_up_20_f();
+        } else {
+            if (use_back) grab_front_down_20_b(); else grab_front_down_20_f();
+        }
     }
 
     /* --- PCB1 "энэ блок дээр grab уу?" асуувал: тактикаар шийдэж хариулна --- */
     if (query_request) {
         query_request = 0;
-        send_query_ans(query_grab_decision(query_block));
+        uint8_t ans = query_grab_decision(query_block);
+        if (ans) grab_armed = 1;   // шинэ QUERY yes → дараагийн GRAB-ыг зэвсэглэ
+        send_query_ans(ans);
+    }
+
+    /* --- MOON/SUN байрлалын serial монитор (huart4 115200, оношилгоо) ---
+     *   pos = moon (counter[1]), sun = counter[0], grab = grabbing (0/1/2).
+     *   Дрифт хянах: робот хөдлөхөд pos + рүү өсвөл moon барьж чадахгүй байна.  */
+    {
+        static uint32_t moon_mon_ts = 0;
+        if (HAL_GetTick() - moon_mon_ts >= 50) {
+            moon_mon_ts = HAL_GetTick();
+            char mline[64];
+            snprintf(mline, sizeof(mline), "MOON\tpos=%d\tsun=%d\tgrab=%d\n",
+                     counter[1], counter[0], grabbing);
+            send_uart(mline);
+        }
     }
 
     /* --- L1: GRID ↔ PLAN хуудас сэлгэх --- */
@@ -505,6 +559,9 @@ void Tactic_Task(void) {
             set_route  = route;
             set_msg_ms = HAL_GetTick();
             dirty      = 1;
+            grab_n     = 0;        // ШИНЭ run → грабын тоологч тэглэх (1-р grab=front)
+            grabbing   = 0;        // өмнөх grab/hold-ыг таслах
+            grab_armed = 0;        // зэвсэглэлийг цэвэрлэх
         }
     }
 

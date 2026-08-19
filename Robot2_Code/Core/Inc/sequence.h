@@ -44,5 +44,11 @@ void    auto_climb(void);         // route латчилж, тэр замын cli
 
 /* ---- GRAB STRAFE TEST: PCB2-ийн "Grab test" (мод 13)-тэй хамт (PCB1 strafe) - */
 void    Grab_Strafe_Test(void);   // PCB2-оос ирэх 0xB7 команд дагаж зүүн/баруун strafe
+void    Exit_Test(void);          // ГАРАХ маневрын рак-сунах хэсэг (D-Up эхлүүл)
+
+/* ---- TICTACTOE: exit-ийн дараах үргэлжлэл (straight drive → val5==0 → ...) -- */
+uint8_t tictactoe(void);          // non-blocking; 1 = дуусав
+void    tictactoe_reset(void);
+void    Tic_Tac_Toe_Test(void);   // тусдаа турших (D-Up эхлүүл)
 
 #endif /* INC_SEQUENCE_H_ */

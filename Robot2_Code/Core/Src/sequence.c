@@ -70,7 +70,8 @@ static void Rack_Hold(int f_pos, int b_pos) {
 #define SEQ_DRIVE_PWM (-250)
 #define SEQ_DRIVE_PWM_SLOW (-200) // зарим блокуудад бага хурд хэрэгтэй
 #define EXIT_DRIVE_PWM (-1000)    // гарах маневр: val5 руу MAX хурдаар урагш
-#define EXIT_RACK 700             // гарах маневр: 2 дахь урагшаас өмнө хоёр рак ЭНД
+#define EXIT_RAMP_PWM  (-400)     // ramp-аар гарах УДААН хурд (рак 500 сунасан үед)
+#define EXIT_RACK 500             // гарах маневр: 2 дахь урагшаас өмнө хоёр рак ЭНД (700→500)
 
 /* -----------------------------------------------------------------------------
  *  Drive_Open — GYRO-гоор чиг барьж шулуун явах (Drive_Straight-ийн бүрхүүл)
@@ -219,6 +220,60 @@ void up_20_reset(void) {
   u20_state = U20_S0_DRIVE;
   wait_active = 0;
 }
+
+/* =============================================================================
+ *  up_20_position — up_20 грабын БАЙРЛАЛТ (up_20_function-ий S0-S2 хэсэг):
+ *    drive val5==0 → рак 1000 (RACK_UP) → val7==0 хүртэл урагш → рак 1000-д БАРЬЖ хол.
+ *  PCB2-ийн up_20 граб (sun/moon)-ыг турших PCB1 тал.  1 = байрлалд хүрч рак UP.
+ * =============================================================================
+ */
+#define U20P_FWD_MS 500 // grab хийх үед val7-ийн ДАРАА нэмж урагших хугацаа (grab_step-д)
+
+static uint8_t u20p_state = 0; // 0=drv-val5 1=rack1000 2=drv-val7 3=hold(done, val7-д)
+
+void up_20_position_reset(void) { u20p_state = 0; }
+
+uint8_t up_20_position(void) {
+  switch (u20p_state) {
+  case 0: // val5 == 0 болтол урагш
+    Drive_Open(SEQ_DRIVE_PWM);
+    if (val5 == 0) {
+      brake();
+      u20p_state = 1;
+    }
+    break;
+  case 1: // хоёр рак 1000 (RACK_UP) руу
+    if (Rack_GoTo_Sync(RACK_UP))
+      u20p_state = 2;
+    break;
+  case 2: // рак 1000 БАРЬЖ, val7 == 0 болтол урагш → val7-д ЗОГС (+500ms-гүй)
+    Rack_Hold(RACK_UP, RACK_UP);
+    Drive_Open(SEQ_DRIVE_PWM);
+    if (val7 == 0) {
+      brake();
+      u20p_state = 3;
+    }
+    break;
+  case 3: // байрласан (val7, рак дээш) — query/grab хийх зуур БАРЬЖ хол
+    Rack_Hold(RACK_UP, RACK_UP);
+    break;
+  }
+  return (u20p_state == 3) ? 1 : 0;
+}
+
+/* =============================================================================
+ *  up_20_finish — up_20 грабын ДАРААХ climb (up_20_function-ий S3-S6):
+ *    front рак 0 → val4 урагш → back рак 0 → val3 урагш → дуусав.
+ *  up_20_position + up-граб дууссаны ДАРАА auto_climb дуудна.  1 = дуусав.
+ *  up_20_function-ий төлвийг S3-аас эхлүүлж, түүнийг үргэлжлүүлнэ.
+ * =============================================================================
+ */
+void up_20_finish_reset(void) {
+  frontRack.land_soft = 0;       // S3-д front-ийг ХҮЧТЭЙ буулгах (up_20_function S2 шиг)
+  u20_state = U20_S3_FRONT_DOWN; // up_20_function-ыг S3-аас үргэлжлүүлнэ
+}
+
+uint8_t up_20_finish(void) { return up_20_function(); }
 
 /* =============================================================================
  *  down_20_function — 20-оос БУУХ дараалал (шат доошоо; УХРАХГҮЙ, урагшаа явна)
@@ -716,8 +771,9 @@ extern volatile uint32_t
     g_strafe_ms; // main.c: сүүлд strafe команд ирсэн үе (шинэлэг)
 extern volatile uint32_t route_rx_n;  // main.c: USART2 RX нийт байт (оношилгоо)
 extern volatile uint32_t route_pkt_n; // main.c: бүрэн задарсан багц
-void Link_Send_Grab(void);            // main.c: PCB2 руу GRAB команд илгээх
+void Link_Send_Grab(uint8_t type);    // main.c: PCB2 руу GRAB команд (0=down 1=up)
 void Link_Query_Block(uint8_t block); // main.c: "энэ блок дээр grab уу?" асуух
+extern int control_data[5][4];        // main.c: джойстик/товчлуурын өгөгдөл (△ товч)
 
 /* grab handshake-ийн тохиргоо */
 #define GRAB_STRAFE 250    // хажуулах хурд (PWM)
@@ -739,13 +795,27 @@ void Link_Query_Block(uint8_t block); // main.c: "энэ блок дээр grab 
  * timeout).
  * -----------------------------------------------------------------------------
  */
-static uint8_t grab_step(uint8_t *st, uint32_t *t0) {
+static uint8_t grab_step(uint8_t *st, uint32_t *t0, uint8_t grab_type,
+                         uint8_t positioned) {
   switch (*st) {
-  case 0: /* УРАГШ — val7 == 1 болтол (эсвэл timeout хамгаалалт) → GRAB эхлүүл
-           */
+  case 0: /* GRAB эхлүүл.  positioned=1 (up_20: val7-д байрласан) бол +500ms НЭМЖ
+             урагшлаад GRAB; down бол val7 == 1 хүртэл урагш. */
+    if (positioned) { // up_20: val7 дээр байна → +500ms урагш → GRAB
+      if (HAL_GetTick() - *t0 < U20P_FWD_MS) {
+        Drive_Open(GRAB_FWD_PWM); // +500ms урагш (рак auto_climb-д барина)
+        break;
+      }
+      brake();
+      Link_Send_Grab(grab_type);
+      g_grab_done = 0;
+      g_strafe_cmd = 0;
+      *st = 1;
+      *t0 = HAL_GetTick();
+      break;
+    }
     if (val7 == 1 || HAL_GetTick() - *t0 >= GRAB_FWD_TIMEOUT_MS) {
       brake();
-      Link_Send_Grab(); // PCB2 дараалал эхлүүл
+      Link_Send_Grab(grab_type); // PCB2 дараалал эхлүүл (төрөл: 0=down 1=up)
       g_grab_done = 0;
       g_strafe_cmd = 0; // цэвэр эхлэл (зогс)
       *st = 1;
@@ -758,7 +828,7 @@ static uint8_t grab_step(uint8_t *st, uint32_t *t0) {
   case 1: /* PCB2 удирдлагаар strafe хийж, "done" хүлээх */
     // GRAB алдагдсан бол давтан илгээх (PCB2 хариу өгөх хүртэл)
     if (!g_grab_done && HAL_GetTick() - *t0 >= GRAB_RESEND_MS) {
-      Link_Send_Grab();
+      Link_Send_Grab(grab_type);
       *t0 = HAL_GetTick();
     }
     // PCB2-ийн strafe командыг биелүүлэх (ЗӨВХӨН шинэлэг команд бол)
@@ -798,25 +868,28 @@ typedef struct {
 } ClimbStep_t;
 
 static const ClimbStep_t ROUTE1[] = {
-    /* багана 1: 1→4→7→10 (БАТЛАГДСАН) */
+    /* багана 1: 1→4→7→10 (БАТЛАГДСАН).  block=0 = EXIT (grab үгүй) */
     {up_40_function, up_40_reset, 1, 1},
     {down_20_function, down_20_reset, 1, 4},
-    {up_20_function, up_20_reset, 1, 7},
-    {down_20_function, down_20_reset, 2, 10},
+    {up_20_position, up_20_position_reset, 1, 7},
+    {down_20_function, down_20_reset, 1, 10},
+    {down_20_function, down_20_reset, 1, 0}, // EXIT (2 дахь down_20 = minhua-гоос гарах)
 };
 static const ClimbStep_t ROUTE2[] = {
-    /* багана 2: 2→5→8→11  ⚠ ТААМАГ */
-    {up_20_function, up_20_reset, 1, 2},
-    {up_20_function, up_20_reset, 1, 5},
-    {up_20_function, up_20_reset, 1, 8},
+    /* багана 2: 2→5→8→11.  up_20×3 → down_20(grab) → down_40(EXIT) */
+    {up_20_position, up_20_position_reset, 1, 2},
+    {up_20_position, up_20_position_reset, 1, 5},
+    {up_20_position, up_20_position_reset, 1, 8},
     {down_20_function, down_20_reset, 1, 11},
+    {down_40_function, down_40_reset, 1, 0}, // EXIT (down_40 = minhua-гоос гарах)
 };
 static const ClimbStep_t ROUTE3[] = {
-    /* багана 3: 3→6→9→12  ⚠ ТААМАГ */
+    /* багана 3: 3→6→9→12  ⚠ ТААМАГ.  block=0 = EXIT (grab үгүй) */
     {up_40_function, up_40_reset, 1, 3},
-    {up_20_function, up_20_reset, 1, 6},
+    {up_20_position, up_20_position_reset, 1, 6},
     {down_20_function, down_20_reset, 1, 9},
-    {down_20_function, down_20_reset, 2, 12},
+    {down_20_function, down_20_reset, 1, 12},
+    {down_20_function, down_20_reset, 1, 0}, // EXIT (2 дахь down_20 = minhua-гоос гарах)
 };
 
 #define QUERY_RESEND_MS 200   // "grab уу?" асуултыг давтах интервал
@@ -831,18 +904,40 @@ static const ClimbStep_t ROUTE3[] = {
  */
 void Grab_Strafe_Test(void) {
   static uint8_t anchored = 0;
+  static uint8_t phase = 0; // 0=strafe-only 1=байрлаж байна 2=байрлав(рак UP + strafe)
+  static uint8_t dup_prev = 0;
   if (!anchored) {
     Set_Yaw_Anchor(); // одоогийн чиг = strafe барих heading
     anchored = 1;
   }
-  if (g_strafe_cmd != 0 && HAL_GetTick() - g_strafe_ms <= GRAB_STRAFE_FRESH_MS) {
-    if (g_strafe_cmd == 1)
-      Strafe_Gyro(-GRAB_STRAFE); // зүүн (дотроо LPMS_Read)
-    else
-      Strafe_Gyro(+GRAB_STRAFE); // баруун
-  } else {
-    brake();
-    LPMS_Read(); // зогсолтод ч DMA буферээ хоослох (хоцрохгүй)
+
+  /* D-Up → up_20 БАЙРЛАЛТ эхлүүлэх (drive val5 → рак 1000 → drive val7).
+     △/○/□ нь PCB2-ийн Grab_Test-д ашиглагддаг тул (нэг PS5-ыг хоёул хардаг)
+     зөрчилгүй D-Up сонгов. */
+  uint8_t dup = (uint8_t)control_data[2][2];
+  if (dup && !dup_prev) { // D-Up rising edge (энгийн — тест триггер)
+    up_20_position_reset();
+    phase = 1;
+  }
+  dup_prev = dup;
+
+  if (phase == 1) {              // --- байрлаж байна (drive + рак) ---
+    if (up_20_position())        // байрлалд хүрэв → рак UP барьж strafe үе рүү
+      phase = 2;
+  } else {                       // --- strafe-only (0) эсвэл байрлав (2) ---
+    if (phase == 2)
+      Rack_Hold(RACK_UP, RACK_UP); // граб хийх зуур рак 1000-д БАРИХ
+    /* PCB2-ийн strafe командыг дага (grab дундах хажуулалт) */
+    if (g_strafe_cmd != 0 &&
+        HAL_GetTick() - g_strafe_ms <= GRAB_STRAFE_FRESH_MS) {
+      if (g_strafe_cmd == 1)
+        Strafe_Gyro(-GRAB_STRAFE); // зүүн (дотроо LPMS_Read)
+      else
+        Strafe_Gyro(+GRAB_STRAFE); // баруун
+    } else {
+      brake();
+      LPMS_Read(); // зогсолтод ч DMA буферээ хоослох (хоцрохгүй)
+    }
   }
 
   static uint32_t t = 0;
@@ -854,7 +949,11 @@ void Grab_Strafe_Test(void) {
     colorFill(Black);
     setCursor(10, 2);
     printStr("GRAB STRAFE");
-    setCursor(10, 30);
+    setCursor(10, 22);
+    printStr("pos:%s", phase == 1   ? "RUN"
+                       : phase == 2 ? "DONE"
+                                    : "idle");
+    setCursor(10, 42);
     printStr("cmd:%s", d);
     setScreen();
   }
@@ -869,6 +968,7 @@ void auto_climb(void) {
   static uint8_t sub = 0;   // 0=MOVE 1=QUERY 2=GRAB
   static uint8_t moved = 0; // step-ийн эхэнд reset хийсэн эсэх
   static uint8_t gst = 0;   // grab дэд төлөв
+  static uint8_t up_pos_done = 0; // up scroll: up_20_position (рак дээш+val7) хийгдсэн эсэх
   static uint32_t gt0 = 0, qt0 = 0;
   static uint8_t ex = 0; // гарах маневр: 0=зүүн 90° эргэх 1=val5 урагш 2=дуусав
   static uint8_t ex_init = 0; // эргэлтийн Gyro_TurnReset хийсэн эсэх
@@ -882,13 +982,13 @@ void auto_climb(void) {
       route = g_route;
       if (route == 1) {
         steps = ROUTE1;
-        nsteps = 4;
+        nsteps = sizeof(ROUTE1) / sizeof(ROUTE1[0]);
       } else if (route == 2) {
         steps = ROUTE2;
-        nsteps = 4;
+        nsteps = sizeof(ROUTE2) / sizeof(ROUTE2[0]);
       } else {
         steps = ROUTE3;
-        nsteps = 4;
+        nsteps = sizeof(ROUTE3) / sizeof(ROUTE3[0]);
       }
       si = 0;
       sub = 0;
@@ -900,7 +1000,19 @@ void auto_climb(void) {
     }
     break;
 
-  case 1:           /* ===== RUN — step бүр: MOVE → QUERY → (GRAB) ===== */
+  case 1: { /* ===== RUN — step бүр: MOVE → QUERY → (GRAB → FINISH) ===== */
+    /* Робот M дээрээс ДАРААГИЙН (дээд) блок M+3-ийн scroll-ыг авна. Тиймээс grab-ийн
+       ТӨРӨЛ ба байрлалт нь steps[si+1] (scroll-ийн блок)-оос ирнэ, роботынхоос БИШ.
+       up scroll (up_20/up_40) → up грип (1) + рак дээш; down → down (0). */
+    const ClimbStep_t *scr = (si + 1 < nsteps) ? &steps[si + 1] : &steps[si];
+    uint8_t is_up_split = (scr->fn == up_20_position); // up scroll → рак дээш барих
+    uint8_t gtype =
+        (scr->fn == up_20_position || scr->fn == up_40_function) ? 1 : 0;
+    /* up scroll: up_20_position дуусаж рак 1000-д гарсны ДАРАА (grab хийх зуур) БАРЬ
+       (унахгүй). up_20_position ажиллаж байх зуур рак-ийг ТЭР өөрөө удирдана. */
+    if (is_up_split && sub == 2 && up_pos_done)
+      Rack_Hold(RACK_UP, RACK_UP);
+
     if (sub == 0) { /* --- MOVE: тухайн блок руу --- */
       if (!moved) {
         steps[si].rst();
@@ -909,11 +1021,17 @@ void auto_climb(void) {
       }
       if (run_n(steps[si].fn, steps[si].rst, steps[si].count, &cnt)) {
         brake();
-        Set_Yaw_Anchor();                  // strafe-ийн чиг барих
-        Link_Query_Block(steps[si].block); // "энд grab уу?"
-        g_grab_ans_rdy = 0;
-        qt0 = HAL_GetTick();
-        sub = 1;
+        if (steps[si].block == 0) { // EXIT алхам (minhua-гоос гарах) — grab үгүй
+          si++;
+          moved = 0;
+          sub = 0;
+        } else {
+          Set_Yaw_Anchor();                  // strafe-ийн чиг барих
+          Link_Query_Block(steps[si].block); // "энд grab уу?"
+          g_grab_ans_rdy = 0;
+          qt0 = HAL_GetTick();
+          sub = 1;
+        }
       }
     } else if (sub == 1) { /* --- QUERY: PCB2 хариу хүлээх --- */
       brake();
@@ -926,30 +1044,72 @@ void auto_climb(void) {
         if (g_grab_ans) {
           gst = 0;
           gt0 = HAL_GetTick();
+          up_pos_done = 0;                      // up scroll: эхлээд up_20_position
+          if (is_up_split) up_20_position_reset();
           sub = 2;
         } // → GRAB
-        else {
+        else if (is_up_split) { // grab үгүй ч up_20 бол S3-S6 үргэлжилнэ
+          up_20_finish_reset();
+          sub = 3;
+        } else {
           si++;
           moved = 0;
           sub = 0;
         } // SKIP
-      } else if (HAL_GetTick() - qt0 >= QUERY_TIMEOUT_MS) { // хариугүй → SKIP
-        si++;
-        moved = 0;
-        sub = 0;
+      } else if (HAL_GetTick() - qt0 >= QUERY_TIMEOUT_MS) { // хариугүй
+        if (is_up_split) {
+          up_20_finish_reset();
+          sub = 3;
+        } else {
+          si++;
+          moved = 0;
+          sub = 0;
+        }
       }
-    } else { /* --- GRAB: зүүн→PCB2→баруун --- */
-      if (grab_step(&gst, &gt0)) {
+    } else if (sub == 2) { /* --- GRAB: зүүн→PCB2→баруун --- */
+      /* up scroll: ЭХЛЭЭД up_20_position (val5→рак 1000→val7 болтол урагш), ДАРАА grab.
+         down scroll: шууд grab_step (val7 болтол урагш → GRAB). */
+      if (is_up_split && !up_pos_done) {
+        if (up_20_position()) { // рак дээш + val7 болтол урагш дуусав
+          up_pos_done = 1;
+          gst = 0;
+          gt0 = HAL_GetTick(); // grab_step-ийн +500ms таймер (positioned)
+        }
+      } else if (grab_step(&gst, &gt0, gtype, is_up_split)) {
+        if (is_up_split) { // up_20: grab дараа S3-S6 үргэлжлүүл
+          up_20_finish_reset();
+          sub = 3;
+        } else {
+          si++;
+          moved = 0;
+          sub = 0;
+        }
+      }
+    } else { /* --- sub == 3: FINISH — up_20 S3-S6 --- */
+      if (up_20_finish()) {
+        /* up scroll grab дуусав. up_20_position+finish = up_20 БҮТЭН авиралт тул
+           робот дараагийн блок (M+3) руу АЛЬ ХЭДИЙН авирсан. Тэр блокийн MOVE-ыг
+           АЛГАСаж (давхар рак өргөж over-climb хийхгүй) шууд QUERY руу орно. */
         si++;
         moved = 0;
-        sub = 0;
+        if (si < nsteps && steps[si].block != 0) {
+          Set_Yaw_Anchor();                  // strafe-ийн чиг барих
+          Link_Query_Block(steps[si].block); // "энд grab уу?"
+          g_grab_ans_rdy = 0;
+          qt0 = HAL_GetTick();
+          sub = 1; // → QUERY (MOVE алгасав — робот энд авирсан)
+        } else {
+          sub = 0; // EXIT алхам / бүх step дуусав
+        }
       }
     }
     if (si >= nsteps)
       phase = 2; // бүх step дуусав
     break;
+  }
 
-  default: /* 2 = DONE → ГАРАХ: зүүн90° → val5 MAX урагш → баруун90° → val5 MAX урагш → зогс */
+  default: /* 2 = DONE → ГАРАХ: зүүн90° → val5 урагш → баруун90° → рак500 →
+              ramp УДААН урагш → рак0 → баруун90° → зогс (Exit_Test-тэй ижил) */
     if (ex == 0) { // (1) зүүн 90° эргэх
       if (!ex_init) {
         Gyro_TurnReset(); // өмнөх эргэлтийн үлдэгдлийг цэвэрлэх
@@ -979,20 +1139,26 @@ void auto_climb(void) {
       if (Rack_GoTo_Sync(EXIT_RACK)) { // хоёул 700-д хүрэхэд
         ex = 4;
       }
-    } else if (ex == 4) { // (5) val5 == 0 болтол ДАХИН урагш — MAX (рак 700 барина)
+    } else if (ex == 4) { // (5) val5 == 0 болтол ДАХИН урагш — ramp УДААН (рак 500 барина)
       Rack_Hold(EXIT_RACK, EXIT_RACK);
       if (val5 == 0) {
         brake(); // val5 мэдэрлээ → одоо ракыг 0 руу
         ex = 5;
       } else {
-        Drive_Open(EXIT_DRIVE_PWM); // MAX хурдаар урагш (gyro чиг барина)
+        Drive_Open(EXIT_RAMP_PWM); // ramp-аар УДААН урагш (gyro чиг барина)
       }
-    } else if (ex == 5) { // (6) хоёр ракыг 0 руу буулгах (жолоо зогсож байхад)
+    } else if (ex == 5) { // (6) хоёр ракыг 0 руу буулгах → баруун 90° бэлдэх
       brake();
       if (Rack_GoTo_Sync(RACK_DOWN)) { // хоёул 0-д хүрэхэд
+        Gyro_TurnReset();
         ex = 6;
       }
-    } else { // (7) бүрэн дуусав
+    } else if (ex == 6) { // (7) баруун 90° эргэх (Exit_Test-тэй ижил)
+      if (Turn_Right_90()) {
+        brake();
+        ex = 7;
+      }
+    } else { // (8) бүрэн дуусав
       brake();
     }
     break;
@@ -1032,5 +1198,172 @@ void auto_climb(void) {
       printStr("route %d DONE", route);
       setScreen();
     }
+  }
+}
+
+/* =============================================================================
+ *  Exit_Test — minhua-гоос ГАРАХ маневрын "рак сунах" хэсгийг ТУСАД НЬ турших.
+ *    D-Up → эхлэх:  хоёр рак EXIT_RACK(500) руу → val5==0 болтол MAX урагш
+ *                   (рак 500 барьсаар) → хоёр рак 0 руу буулгах → дуусав.
+ *    (auto_climb-ийн DONE маневрын ex3-ex5 хэсэгтэй ижил.)
+ * =============================================================================
+ */
+void Exit_Test(void) {
+  static uint8_t est = 0;      // 0=idle 1=rack500 2=drive-val5 3=rack-down 4=turnR 5=дуусав
+  static uint8_t dup_prev = 0;
+
+  uint8_t dup = (uint8_t)control_data[2][2]; // D-Up rising → эхлүүл
+  if (dup && !dup_prev) {
+    Set_Yaw_Anchor(); // одоогийн чиг = "урагш" (Drive_Open үүнийг барина)
+    est = 1;
+  }
+  dup_prev = dup;
+
+  switch (est) {
+  case 1: // (4) хоёр ракыг 500 руу ЗЭРЭГ (жолоо зогсож байхад)
+    brake();
+    if (Rack_GoTo_Sync(EXIT_RACK))
+      est = 2;
+    break;
+  case 2: // (5) val5 == 0 болтол урагш — ramp УДААН (рак 500 барина)
+    Rack_Hold(EXIT_RACK, EXIT_RACK);
+    if (val5 == 0) {
+      brake();
+      est = 3;
+    } else {
+      Drive_Open(EXIT_RAMP_PWM); // ramp-аар УДААН урагш (дотроо LPMS_Read)
+    }
+    break;
+  case 3: // (6) хоёр ракыг 0 руу буулгах → баруун 90° бэлдэх
+    brake();
+    if (Rack_GoTo_Sync(RACK_DOWN)) {
+      Gyro_TurnReset(); // өмнөх эргэлтийн үлдэгдлийг цэвэрлэх
+      est = 4;
+    }
+    break;
+  case 4: // (7) баруун 90° эргэх
+    if (Turn_Right_90()) {
+      brake();
+      est = 5;
+    }
+    break;
+  default: // 0=idle, 5=дуусав
+    brake();
+    LPMS_Read(); // зогсолтод ч DMA буферээ хоослох
+    break;
+  }
+
+  static uint32_t t = 0;
+  if (HAL_GetTick() - t >= 100) {
+    t = HAL_GetTick();
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("EXIT TEST");
+    setCursor(2, 24);
+    printStr("est:%d rk%d", est, EXIT_RACK);
+    setCursor(2, 44);
+    printStr("Bk%d Fr%d", counter[0], counter[1]);
+    setScreen();
+  }
+}
+
+/* =============================================================================
+ *  tictactoe — ГАРАХ маневрын (баруун 90°) ДАРААХ үргэлжлэл.
+ *    Алхам 1: gyro чиг + хойд 2 дугуйн encoder balance-тай ШУЛУУН урагш →
+ *             val5 == 0 болтол (аюулгүй: TTT_MAX_COUNTS зайд хүрвэл зогсоно;
+ *             суурийн encoder ~17000 хүлээж байгаа).
+ *    (Дараагийн алхмуудыг ЭНД нэмнэ.)
+ *    Non-blocking: давталт бүрд дуудна.  1 = бүрэн дуусав.
+ * =============================================================================
+ */
+#define TTT_DRIVE_PWM (-500)  // урагш хурд (СӨРӨГ = урагш) — тааруулна
+#define TTT_MAX_COUNTS 20000  // аюулгүй: val5 ирэхгүй бол энэ зайд зогсоно (~17000 хүлээж)
+#define TTT_STRAFE_PWM (500)  // val5-д хүрсний дараах strafe (ЭЕРЭГ=баруун, сөрөг=зүүн)
+#define TTT_STRAFE_MS 500     // strafe үргэлжлэх хугацаа (ms)
+#define TTT_REVERSE_PWM (500) // рак дээшлэхийн өмнөх УХРАХ (ЭЕРЭГ=ухрах)
+#define TTT_REVERSE_MS 500    // ухрах хугацаа (ms)
+#define TTT_RACK 700          // ухрасны дараа рак сунах байрлал
+
+static uint8_t ttt_st = 0;
+static uint32_t ttt_t0 = 0;
+
+void tictactoe_reset(void) { ttt_st = 0; }
+
+uint8_t tictactoe(void) {
+  switch (ttt_st) {
+  case 0: // straight drive эхлүүл (anchor + хойд encoder эхлэл барих)
+    TTT_Drive_Start();
+    ttt_st = 1;
+    break;
+  case 1: // val5 == 0 (эсвэл аюулгүй зайд хүртэл) шулуун урагш
+    if (val5 == 0 || TTT_Drive_Counts() >= TTT_MAX_COUNTS) {
+      brake();
+      ttt_t0 = HAL_GetTick(); // strafe таймер эхлүүл
+      ttt_st = 2;
+    } else {
+      TTT_Drive(TTT_DRIVE_PWM); // gyro + дугуй balance-тай урагш
+    }
+    break;
+  case 2: // val5-д хүрэв → 500ms strafe (gyro чиг барьж)
+    if (HAL_GetTick() - ttt_t0 >= TTT_STRAFE_MS) {
+      brake();
+      ttt_t0 = HAL_GetTick(); // ухрах таймер эхлүүл
+      ttt_st = 3;
+    } else {
+      Strafe_Gyro(TTT_STRAFE_PWM); // баруун (эерэг); дотроо LPMS_Read + чиг барина
+    }
+    break;
+  case 3: // strafe дуусав → 500ms УХРАХ (рак дээшлэхийн өмнө)
+    if (HAL_GetTick() - ttt_t0 >= TTT_REVERSE_MS) {
+      brake();
+      ttt_st = 4;
+    } else {
+      Drive_Open(TTT_REVERSE_PWM); // ухрах (эерэг=ухрах); дотроо LPMS_Read + чиг барина
+    }
+    break;
+  case 4: // ухрав → хоёр ракыг 700 руу сунах
+    brake();
+    if (Rack_GoTo_Sync(TTT_RACK))
+      ttt_st = 5; // → PCB2 руу sol5 команд илгээх (coordination TBD)
+    break;
+  default: // 5 = дуусав
+    brake();
+    return 1;
+  }
+  return 0;
+}
+
+/* Tic_Tac_Toe_Test — tictactoe-г ТУСДАА турших (D-Up эхлүүл). ⚠ LPMS идэвхтэй байх. */
+void Tic_Tac_Toe_Test(void) {
+  static uint8_t started = 0, done = 0;
+  static uint8_t dup_prev = 0;
+
+  uint8_t dup = (uint8_t)control_data[2][2]; // D-Up rising → эхлүүл
+  if (dup && !dup_prev) {
+    tictactoe_reset();
+    started = 1;
+    done = 0;
+  }
+  dup_prev = dup;
+
+  if (started && !done) {
+    if (tictactoe())
+      done = 1;
+  } else {
+    brake();
+    LPMS_Read(); // зогсолтод ч DMA буферээ хоослох
+  }
+
+  static uint32_t t = 0;
+  if (HAL_GetTick() - t >= 100) {
+    t = HAL_GetTick();
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("TICTACTOE");
+    setCursor(2, 24);
+    printStr("st%d v5:%d", ttt_st, (int)val5);
+    setCursor(2, 44);
+    printStr("cnt%d", (int)TTT_Drive_Counts());
+    setScreen();
   }
 }

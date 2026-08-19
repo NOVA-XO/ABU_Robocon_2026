@@ -66,7 +66,7 @@ extern TIM_HandleTypeDef htim7;
 extern DMA_HandleTypeDef hdma_uart4_tx;
 extern UART_HandleTypeDef huart3;
 /* USER CODE BEGIN EV */
-
+extern UART_HandleTypeDef huart4;   // 2 PCB хоорондын холбоо (PCB2 RX interrupt)
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -270,6 +270,16 @@ void USART3_IRQHandler(void)
 
   /* USER CODE END USART3_IRQn 1 */
 }
+
+/* USER CODE BEGIN 1 */
+/**
+  * @brief UART4 global interrupt — 2 PCB хоорондын холбоо (PCB2 RX)
+  */
+void UART4_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart4);
+}
+/* USER CODE END 1 */
 
 /**
   * @brief This function handles TIM7 global interrupt.

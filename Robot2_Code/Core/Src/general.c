@@ -268,9 +268,11 @@ Rack_t frontRack = {
     // pwm_down 150→300: front 0 руу буухдаа 1686 дээр ГАЦдаг байв (150
     // хүрэлцэхгүй).
     .pwm_up = 580, // 700→580: зорилтод удаан ороод инерцийн хальалтыг багасгах
-    .pwm_down = 600, // 350→600: front СОЛО (land_soft=0) 0 руу буух удаан байв
-                     //   (хамтдаа буух land_soft=1 нь governor-оор намуухан хэвээр).
-    .pwm_soft = 350, // ЗӨӨЛӨН (хамтдаа) буултын ТУСДАА дээд PWM (pwm_down-оос хамааралгүй)
+    .pwm_down =
+        600, // 350→600: front СОЛО (land_soft=0) 0 руу буух удаан байв
+             //   (хамтдаа буух land_soft=1 нь governor-оор намуухан хэвээр).
+    .pwm_soft = 350, // ЗӨӨЛӨН (хамтдаа) буултын ТУСДАА дээд PWM (pwm_down-оос
+                     // хамааралгүй)
     .hold_pwm =
         100, // 150→100: 150 нь таталцлын хүч(~90)-ээс ИХ байсан → зорилтоос
              //   дээш түрж +13 суудаг байв. Барих хүчид ойртуулав.
@@ -307,7 +309,8 @@ Rack_t backRack = {
     //   хэвээр.)
     .pwm_up = 750,
     .pwm_down = 600,
-    .pwm_soft = 350, // ЗӨӨЛӨН (хамтдаа) буултын ТУСДАА дээд PWM (pwm_down-оос хамааралгүй)
+    .pwm_soft = 350, // ЗӨӨЛӨН (хамтдаа) буултын ТУСДАА дээд PWM (pwm_down-оос
+                     // хамааралгүй)
     .hold_pwm =
         130, // 90→130: 90 нь бага → 7 дутуу; 175 нь их → дээш түлхдэг.
              //   Үрэлтийн бүс (10-170)-ийн дунд-дээд → зорилтод ойртуулна.
@@ -485,8 +488,9 @@ static uint8_t rack_step(Rack_t *r, int target) {
   uint8_t raised = (target > r->pos_min + r->tolerance);
 
   // 0 руу (home) буухдаа: encoder tolerance-д БИШ, доод SWITCH дарагдсан үед л
-  //   "хүрсэн" гэнэ — эс бөгөөс рак 14 count дээр зогсоод switch хүрдэггүй байв.
-  //   (switch хүрэхгүй гацвал reached=0 тул move_t0 хуучирч timeout хамгаална.)
+  //   "хүрсэн" гэнэ — эс бөгөөс рак 14 count дээр зогсоод switch хүрдэггүй
+  //   байв. (switch хүрэхгүй гацвал reached=0 тул move_t0 хуучирч timeout
+  //   хамгаална.)
   if (!raised)
     reached = at_home;
 
@@ -589,7 +593,8 @@ static uint8_t rack_step(Rack_t *r, int target) {
       if (r->down_lim < (float)RACK_LAND_MIN_PWM)
         r->down_lim = (float)RACK_LAND_MIN_PWM;
       if (r->down_lim > (float)r->pwm_soft) // ЗӨӨЛӨН буултын ТУСДАА дээд PWM
-        r->down_lim = (float)r->pwm_soft;   //   (pwm_down биш — хамтдаа буух намуухан)
+        r->down_lim =
+            (float)r->pwm_soft; //   (pwm_down биш — хамтдаа буух намуухан)
 
       int land = (int)r->down_lim;
       if (aerr < (float)RACK_LAND_ZONE) { // switch рүү ойртвол нэмж зөөлрүүл
@@ -621,9 +626,10 @@ static uint8_t rack_step(Rack_t *r, int target) {
     }
 
     // 0 руу (home) буухдаа switch-ийг НАЙДВАРТАЙ цохих: ойрын бүсэд (aerr бага)
-    //   kp·алдаа бага болж жижиг pwm (~-68)-ээр switch дэргэд гацна. Доод хурдын
-    //   floor (-RACK_HOME_APPROACH) тавьж switch хүртэл хангалттай хүчээр түлхнэ.
-    //   Зөвхөн switch хүрээгүй үед (эс бөгөөс at_home protection доор 0 болгоно).
+    //   kp·алдаа бага болж жижиг pwm (~-68)-ээр switch дэргэд гацна. Доод
+    //   хурдын floor (-RACK_HOME_APPROACH) тавьж switch хүртэл хангалттай
+    //   хүчээр түлхнэ. Зөвхөн switch хүрээгүй үед (эс бөгөөс at_home protection
+    //   доор 0 болгоно).
     if (!raised && !at_home && aerr < (float)RACK_NEAR_ZONE &&
         pwm > -RACK_HOME_APPROACH)
       pwm = -RACK_HOME_APPROACH;
@@ -1929,6 +1935,463 @@ void Drive_Straight_Test(void) {
     printStr("off:%d", (int)off);
     setCursor(2, 50);
     printStr("max:%d", (int)max_off);
+    setScreen();
+  }
+}
+
+/* =============================================================================
+ *  Drive_Distance — хойд хос дугуйн encoder-ээр хэмжсэн ЗАЙ явж ТАГ зогсох
+ *
+ *    counter[2] = En3 = мотор 3 (RL) ,  counter[3] = En4 = мотор 4 (RR)
+ *    Урагш = base_pwm СӨРӨГ (жолооны конвенц).  Чигийг gyro-гоор барина
+ *    (Drive_Straight-тэй ижил залруулга).  Non-blocking: Service() бүр
+ * давталтад.
+ *
+ *    Drive_Distance_Start(counts): counts>0 → урагш, counts<0 → ухрах (encoder
+ * тоо). Drive_Distance_Service():     1 = зорилтод хүрч суусан (эсвэл timeout),
+ * 0 = яваа.
+ *
+ *  ⚠ DIST_ENC_SIGN — урагш явахад дундаж тоолуур БУУРвал (−) болго. Буруу бол
+ *    робот зорилтоос ЗУГТАана (эерэг эргэх холбоо) — тиймээс timeout + MAX
+ * хамгаална.
+ * =============================================================================
+ */
+#define DIST_KP 2.0f       // counts алдаа → PWM
+#define DIST_KI 0.0f       // эхлээд 0; үлдэгдэл хазайлт байвал бага нэмнэ
+#define DIST_KD 8.0f       // зорилтод ойртохдоо инерцийг тоормослох
+#define DIST_IMAX 8000.0f  // integral хана (windup хамгаалалт)
+#define DIST_MAX_PWM 450   // хурдны дээд хязгаар (motor_control −1000..1000)
+#define DIST_MIN_PWM 120   // зорилтод хүрээгүй үед статик үрэлт таслах доод хүч
+#define DIST_TOL 15        // "ирсэн" гэж үзэх tolerance (counts)
+#define DIST_SETTLE_MS 150 // tolerance дотор ийм хугацаа суувал ДУУССАН
+#define DIST_TIMEOUT_MS                                                        \
+  15000 // аюулгүй: үүнээс удвал зогсоод дуусгана (8000-д хүрэлцээтэй)
+#define DIST_RUNAWAY                                                           \
+  1500 // |алдаа| эхнийхээс үүнээс ИХ өсвөл = тэмдэг буруу → зогсоо
+#define DIST_ENC_SIGN                                                          \
+  (-1) // урагш явахад тоолуур БУУРдаг тул −1 (ХЭМЖИЖ тогтоов)
+#define DIST_WHEEL_KP 0.5f // хоёр хойд дугуйн явсан зайн ЗӨРҮҮГ багасгах засвар
+#define DIST_WHEEL_MAX 120 // дугуй тэнцвэржүүлэх засврын дээд PWM
+#define DIST_CORR_MAX 200  // gyro + дугуй засврын НИЙТ дээд PWM
+
+static uint8_t dd_active = 0;
+static long dd_target = 0, dd_init_err = 0, dd_s2 = 0, dd_s3 = 0;
+static float dd_integral = 0.0f, dd_prev_err = 0.0f, dd_dfilt = 0.0f;
+static uint32_t dd_last_ms = 0, dd_intol_ms = 0, dd_start_ms = 0;
+
+/* хойд хос дундаж, урагш = ЭЕРЭГ болгож тэмдэг залруулна */
+static long dd_pos(void) {
+  return DIST_ENC_SIGN * (((long)counter[2] + (long)counter[3]) / 2);
+}
+
+void Drive_Distance_Start(long counts) {
+  Set_Yaw_Anchor(); // одоогийн чигийг "шулуун" болгоно
+  dd_target = dd_pos() + counts;
+  dd_init_err = (counts < 0) ? -counts : counts;
+  dd_s2 = counter[2]; // дугуй бүрийн эхлэлийн тоолуур (зөрүү тэнцвэржүүлэхэд)
+  dd_s3 = counter[3];
+  dd_integral = 0.0f;
+  dd_prev_err = 0.0f;
+  dd_dfilt = 0.0f;
+  dd_last_ms = HAL_GetTick();
+  dd_intol_ms = 0;
+  dd_start_ms = HAL_GetTick();
+  dd_active = 1;
+}
+
+void Drive_Distance_Stop(void) {
+  brake();
+  dd_active = 0;
+}
+
+uint8_t Drive_Distance_Service(void) {
+  if (!dd_active)
+    return 1;
+
+  uint32_t now = HAL_GetTick();
+  float dt = (now - dd_last_ms) / 1000.0f;
+  if (dt < 0.001f)
+    dt = 0.001f;
+  dd_last_ms = now;
+
+  long err = dd_target - dd_pos(); // >0 → цааш урагш явах ёстой
+  long ae = (err < 0) ? -err : err;
+
+  /* --- ирсэн + суусан эсэх (tolerance + settle) --- */
+  if (ae <= DIST_TOL) {
+    if (dd_intol_ms == 0)
+      dd_intol_ms = now;
+    if (now - dd_intol_ms >= DIST_SETTLE_MS) {
+      brake();
+      dd_active = 0;
+      return 1;
+    }
+  } else {
+    dd_intol_ms = 0;
+  }
+
+  /* --- аюулгүй timeout (тэмдэг буруу / гацсан бол зугтахаас сэргийлнэ) --- */
+  if (now - dd_start_ms >= DIST_TIMEOUT_MS) {
+    brake();
+    dd_active = 0;
+    return 1;
+  }
+
+  /* --- runaway: алдаа эхнийхээс өсвөл = тэмдэг буруу (эерэг эргэх холбоо) →
+   * зогсоо --- */
+  if (ae > dd_init_err + DIST_RUNAWAY) {
+    brake();
+    dd_active = 0;
+    return 1;
+  }
+
+  /* --- PID (алдаа counts-аар) --- */
+  dd_integral += (float)err * dt;
+  if (dd_integral > DIST_IMAX)
+    dd_integral = DIST_IMAX;
+  if (dd_integral < -DIST_IMAX)
+    dd_integral = -DIST_IMAX;
+  float deriv = ((float)err - dd_prev_err) / dt;
+  dd_dfilt = 0.7f * dd_dfilt + 0.3f * deriv; // шуугиан шүүх
+  dd_prev_err = (float)err;
+
+  float pid = DIST_KP * (float)err + DIST_KI * dd_integral + DIST_KD * dd_dfilt;
+
+  int base = -(int)pid; // урагш = СӨРӨГ
+  if (base > DIST_MAX_PWM)
+    base = DIST_MAX_PWM;
+  if (base < -DIST_MAX_PWM)
+    base = -DIST_MAX_PWM;
+  if (ae > DIST_TOL && base > -DIST_MIN_PWM && base < DIST_MIN_PWM)
+    base = (err > 0) ? -DIST_MIN_PWM : DIST_MIN_PWM; // стик таслах доод хүч
+
+  /* --- gyro-гоор чиг засвар (Drive_Straight-тэй ижил) --- */
+  LPMS_Read();
+  float corr = STRAIGHT_KP * Get_Yaw_Offset_From_Anchor();
+  if (corr > STRAIGHT_MAX_CORR)
+    corr = STRAIGHT_MAX_CORR;
+  if (corr < -STRAIGHT_MAX_CORR)
+    corr = -STRAIGHT_MAX_CORR;
+
+  /* --- хоёр хойд дугуйн явсан зайн ЗӨРҮҮГ багасгах засвар (encoder тэнцвэр)
+   * --- */
+  long travL = DIST_ENC_SIGN * (counter[2] - dd_s2); // мотор3 (RL) явсан зай
+  long travR = DIST_ENC_SIGN * (counter[3] - dd_s3); // мотор4 (RR) явсан зай
+  float wc = DIST_WHEEL_KP * (float)(travL - travR); // >0 = зүүн ИЛҮҮ явсан
+  if (wc > DIST_WHEEL_MAX)
+    wc = DIST_WHEEL_MAX;
+  if (wc < -DIST_WHEEL_MAX)
+    wc = -DIST_WHEEL_MAX;
+
+  int c = (int)(corr - wc); // зүүн илүү явсан бол c буурч зүүнийг удаашруулна
+  if (c > DIST_CORR_MAX)
+    c = DIST_CORR_MAX;
+  if (c < -DIST_CORR_MAX)
+    c = -DIST_CORR_MAX;
+
+  motor_control(1, base - c); // FL (зүүн)
+  motor_control(2, base + c); // FR (баруун)
+  motor_control(3, base - c); // RL (зүүн)
+  motor_control(4, base + c); // RR (баруун)
+  return 0;
+}
+
+/* =============================================================================
+ *  TTT_Drive — tictactoe-ийн STRAIGHT DRIVE (gyro чиг + хойд 2 дугуйн encoder
+ *    balance-тай) ТОГТМОЛ хурдаар урагш. Зайн PID байхгүй — зогсоолтыг (val5 /
+ *    зай) ДУУДАГЧ шалгана.  Drive_Straight (gyro) + Drive_Distance-ийн дугуй
+ *    balance-ыг нэгтгэв.  Урагш = СӨРӨГ PWM.
+ *      TTT_Drive_Start(): одоогийн чигийг anchor, хойд encoder-ийг эхлэл болгоно.
+ *      TTT_Drive(base):   нэг алхам жолоодоно.
+ *      TTT_Drive_Counts():эхлэлээс явсан зай (урагш = ЭЕРЭГ).
+ * =============================================================================
+ */
+static long ttt_s2 = 0, ttt_s3 = 0;
+
+void TTT_Drive_Start(void) {
+  Set_Yaw_Anchor();    // одоогийн чиг = "шулуун"
+  ttt_s2 = counter[2]; // хойд дугуйн encoder эхлэл (тэнцвэржүүлэхэд)
+  ttt_s3 = counter[3];
+}
+
+void TTT_Drive(int base) {
+  LPMS_Read();
+  float corr = STRAIGHT_KP * Get_Yaw_Offset_From_Anchor(); // gyro чиг засвар
+  if (corr > STRAIGHT_MAX_CORR)
+    corr = STRAIGHT_MAX_CORR;
+  if (corr < -STRAIGHT_MAX_CORR)
+    corr = -STRAIGHT_MAX_CORR;
+  long travL = DIST_ENC_SIGN * (counter[2] - ttt_s2); // RL явсан зай
+  long travR = DIST_ENC_SIGN * (counter[3] - ttt_s3); // RR явсан зай
+  float wc = DIST_WHEEL_KP * (float)(travL - travR);  // дугуйн зөрүү засвар
+  if (wc > DIST_WHEEL_MAX)
+    wc = DIST_WHEEL_MAX;
+  if (wc < -DIST_WHEEL_MAX)
+    wc = -DIST_WHEEL_MAX;
+  int c = (int)(corr - wc);
+  if (c > DIST_CORR_MAX)
+    c = DIST_CORR_MAX;
+  if (c < -DIST_CORR_MAX)
+    c = -DIST_CORR_MAX;
+  motor_control(1, base - c); // FL (зүүн)
+  motor_control(2, base + c); // FR (баруун)
+  motor_control(3, base - c); // RL (зүүн)
+  motor_control(4, base + c); // RR (баруун)
+}
+
+long TTT_Drive_Counts(void) { // эхлэлээс явсан зай (урагш = эерэг)
+  return DIST_ENC_SIGN * (((counter[2] - ttt_s2) + (counter[3] - ttt_s3)) / 2);
+}
+
+/* =============================================================================
+ *  Drive_Distance_Test — зайн PID-ийг OLED-оор тохируулах (serial LPMS-тэй
+ * зөрчилддөг)
+ *
+ *    △ (Triangle) → тохируулсан зайг явж эхлэх (Start)
+ *    ✕ (Cross)    → зогсоох (Stop)  |  D-Down → зогсоох
+ *    L1 / R1      → зорилтот зай −/+ 200 counts
+ *
+ *  OLED: RUN/IDLE, tgt = зорилтот зай, pos = одоогийн дундаж, e2/e3 = түүхий
+ * тоолуур.
+ * =============================================================================
+ */
+#define DDT_STEP 200
+
+void Drive_Distance_Test(void) {
+  static Btn_t bTri = {0}, bX = {0}, bDn = {0}, bL1 = {0}, bR1 = {0};
+  static long dist = 3400; // тохируулж болох зорилтот зай (counts)
+  static uint8_t running = 0;
+  static float max_off = 0.0f; // gyro хамгийн их хазайлт (шулуун эсэхийг харах)
+
+  if (btn_rising(&bL1, (uint8_t)control_data[3][0]))
+    dist -= DDT_STEP;
+  if (btn_rising(&bR1, (uint8_t)control_data[3][1]))
+    dist += DDT_STEP;
+  if (dist < 0)
+    dist = 0;
+
+  if (btn_rising(&bTri, (uint8_t)control_data[1][2])) { // △ → эхлэх
+    Drive_Distance_Start(dist);
+    max_off = 0.0f;
+    running = 1;
+  }
+  if (btn_rising(&bX, (uint8_t)control_data[1][0]) ||
+      btn_rising(&bDn, (uint8_t)control_data[2][0])) { // ✕ / D-Down → зогсоох
+    Drive_Distance_Stop();
+    running = 0;
+  }
+
+  if (running) {
+    if (Drive_Distance_Service())
+      running = 0;                          // дуусвал зогс
+    float a = Get_Yaw_Offset_From_Anchor(); // явж байхад хазайлтыг хянах
+    if (a < 0.0f)
+      a = -a;
+    if (a > max_off)
+      max_off = a;
+  } else {
+    LPMS_Read(); // зогсолтод ч DMA буферээ хоослох
+  }
+
+  static uint32_t t = 0;
+  if (HAL_GetTick() - t >= 100) {
+    t = HAL_GetTick();
+    long pos = DIST_ENC_SIGN * (((long)counter[2] + (long)counter[3]) / 2);
+    float off =
+        Get_Yaw_Offset_From_Anchor(); // одоогийн хазайлт (шулуун = 0 орчим)
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("DIST %s", running ? "RUN" : "IDLE");
+    setCursor(2, 18);
+    printStr("t:%d p:%d", (int)dist, (int)pos);
+    setCursor(2, 34);
+    printStr("e2:%d e3:%d", counter[2], counter[3]);
+    setCursor(2, 50);
+    printStr("yaw:%d mx:%d", (int)off, (int)max_off);
+    setScreen();
+  }
+}
+
+/* =============================================================================
+ *  ЦЭНХЭР ТАЛ — платформ руу очих траекторууд (Drive_Distance PID +
+ * Strafe_Gyro)
+ *
+ *  blue_go_3 — 3-р платформ: 3400 count урагш → 1сек ЗҮҮН strafe → зогс.
+ *    Non-blocking: blue_go_3_reset()-ээр эхлүүлж, blue_go_3()-ыг давталт бүрд
+ *    дуудна (1 = дуусав). Anchor нь Drive_Distance_Start дотор тавигдана —
+ *    урагш ба strafe хоёулаа ТЭР чигийг барина.
+ * =============================================================================
+ */
+#define B3_DIST 3400      // урагш явах зай (encoder count)
+#define B3_STRAFE_PWM 600 // зүүн strafe хурд (PWM)
+#define B3_STRAFE_MS 1000 // зүүн strafe хугацаа (1 секунд)
+
+static uint8_t b3_st = 0; // 0=idle 1=drive3400 2=strafeL 3=done
+static uint32_t b3_t0 = 0;
+
+void blue_go_3_reset(void) {
+  Drive_Distance_Start(B3_DIST); // 3400 урагш (дотор нь Set_Yaw_Anchor)
+  b3_st = 1;
+}
+
+uint8_t blue_go_3(void) {
+  switch (b3_st) {
+  case 1: // 3400 хүртэл урагш
+    if (Drive_Distance_Service()) {
+      b3_t0 = HAL_GetTick();
+      b3_st = 2;
+    }
+    break;
+  case 2:                        // 1сек ЗҮҮН strafe (gyro чиг барина)
+    Strafe_Gyro(-B3_STRAFE_PWM); // vx < 0 → зүүн
+    if (HAL_GetTick() - b3_t0 >= B3_STRAFE_MS) {
+      brake();
+      b3_st = 3;
+    }
+    break;
+  case 3: // дуусав
+    brake();
+    break;
+  }
+  return (b3_st == 3) ? 1 : 0;
+}
+
+/* blue_go_2 — 2-р платформ: 3400 урагш → зүүн 90° → 4000 урагш → баруун 90° →
+ * зогс */
+#define B2_DIST1 3400 // эхний урагш зай
+#define B2_DIST2 4000 // эргэлтийн дараах урагш зай
+
+static uint8_t b2_st =
+    0; // 0=idle 1=drive3400 2=turnL 3=drive4000 4=turnR 5=done
+
+void blue_go_2_reset(void) {
+  Drive_Distance_Start(B2_DIST1);
+  b2_st = 1;
+}
+
+uint8_t blue_go_2(void) {
+  switch (b2_st) {
+  case 1: // 3400 урагш
+    if (Drive_Distance_Service()) {
+      Gyro_TurnReset(); // зүүн 90° эргэлт бэлдэх
+      b2_st = 2;
+    }
+    break;
+  case 2: // зүүн 90° эргэх
+    if (Turn_Left_90()) {
+      Drive_Distance_Start(B2_DIST2); // 4000 (шинэ чигт re-anchor)
+      b2_st = 3;
+    }
+    break;
+  case 3: // 4000 урагш
+    if (Drive_Distance_Service()) {
+      Gyro_TurnReset(); // баруун 90° эргэлт бэлдэх
+      b2_st = 4;
+    }
+    break;
+  case 4: // баруун 90° эргэх
+    if (Turn_Right_90()) {
+      brake();
+      b2_st = 5;
+    }
+    break;
+  case 5: // дуусав
+    brake();
+    break;
+  }
+  return (b2_st == 5) ? 1 : 0;
+}
+
+/* blue_go_1 — 1-р платформ: 3400 урагш → 8000 урагш → баруун 90° → зогс */
+#define B1_DIST1 3400 // эхний урагш зай
+#define B1_DIST2 8000 // үргэлжлүүлэн урагш зай
+
+static uint8_t b1_st = 0; // 0=idle 1=drive3400 2=drive8000 3=turnR 4=done
+
+void blue_go_1_reset(void) {
+  Drive_Distance_Start(B1_DIST1);
+  b1_st = 1;
+}
+
+uint8_t blue_go_1(void) {
+  switch (b1_st) {
+  case 1: // 3400 урагш
+    if (Drive_Distance_Service()) {
+      Drive_Distance_Start(B1_DIST2); // 8000 үргэлжлүүлэн урагш
+      b1_st = 2;
+    }
+    break;
+  case 2: // 8000 урагш
+    if (Drive_Distance_Service()) {
+      Gyro_TurnReset(); // баруун 90° эргэлт бэлдэх
+      b1_st = 3;
+    }
+    break;
+  case 3: // баруун 90° эргэх
+    if (Turn_Right_90()) {
+      brake();
+      b1_st = 4;
+    }
+    break;
+  case 4: // дуусав
+    brake();
+    break;
+  }
+  return (b1_st == 4) ? 1 : 0;
+}
+
+/* Blue_Go_Test — 3 траекторыг турших:  △→go3, ○→go2, □→go1, ✕→зогсоох. */
+void Blue_Go_Test(void) {
+  static Btn_t bT3 = {0}, bT2 = {0}, bT1 = {0}, bStop = {0};
+  static uint8_t active = 0; // 0=none 1=go1 2=go2 3=go3
+
+  if (btn_rising(&bT3, (uint8_t)control_data[1][2])) { // △ → go3
+    blue_go_3_reset();
+    active = 3;
+  }
+  if (btn_rising(&bT2, (uint8_t)control_data[1][3])) { // ○ → go2
+    blue_go_2_reset();
+    active = 2;
+  }
+  if (btn_rising(&bT1, (uint8_t)control_data[1][1])) { // □ → go1
+    blue_go_1_reset();
+    active = 1;
+  }
+  if (btn_rising(&bStop, (uint8_t)control_data[1][0])) { // ✕ → зогсоох
+    brake();
+    b1_st = b2_st = b3_st = 0;
+    active = 0;
+  }
+
+  uint8_t done = 0;
+  if (active == 1)
+    done = blue_go_1();
+  else if (active == 2)
+    done = blue_go_2();
+  else if (active == 3)
+    done = blue_go_3();
+  else
+    LPMS_Read(); // зогсолтод ч DMA буферээ хоослох
+  if (done)
+    active = 0;
+
+  static uint32_t t = 0;
+  if (HAL_GetTick() - t >= 100) {
+    t = HAL_GetTick();
+    int st = (active == 1)   ? b1_st
+             : (active == 2) ? b2_st
+             : (active == 3) ? b3_st
+                             : 0;
+    float off = Get_Yaw_Offset_From_Anchor();
+    colorFill(Black);
+    setCursor(2, 2);
+    printStr("BLUE GO %d", active);
+    setCursor(2, 20);
+    printStr("st:%d", st);
+    setCursor(2, 38);
+    printStr("e2:%d e3:%d", counter[2], counter[3]);
+    setCursor(2, 52);
+    printStr("yaw:%d", (int)off);
     setScreen();
   }
 }

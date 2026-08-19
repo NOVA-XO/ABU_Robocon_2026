@@ -538,7 +538,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     __HAL_LINKDMA(huart,hdmatx,hdma_uart4_tx);
 
     /* USER CODE BEGIN UART4_MspInit 1 */
-
+    /* UART4 global interrupt — 2 PCB хоорондын холбоо (PCB2 RX-д хэрэгтэй) */
+    HAL_NVIC_SetPriority(UART4_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(UART4_IRQn);
     /* USER CODE END UART4_MspInit 1 */
   }
   else if(huart->Instance==USART3)

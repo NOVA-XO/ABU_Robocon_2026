@@ -21,6 +21,16 @@ int  applyDeadzone(int v);            // джойстик утгыг үхмэл 
 void runner(void);                    // джойстикоор mecanum хөдөлгөөн
 void Drive_Straight(int base_pwm);    // gyro-гоор шулуун явах
 
+/* ---- Хойд хос дугуйн encoder-ээр хэмжсэн ЗАЙ (мотор3=En3, мотор4=En4) ------ */
+void    Drive_Distance_Start(long counts);  // урагш явах зай (encoder тоо; + = урагш)
+uint8_t Drive_Distance_Service(void);       // давталт бүрд дуудна: 1=дуусав, 0=явж байна
+void    Drive_Distance_Stop(void);          // албадан зогсоох
+
+/* ---- tictactoe straight drive (gyro + дугуй balance, тогтмол хурд) --------- */
+void    TTT_Drive_Start(void);              // anchor + encoder эхлэл барих
+void    TTT_Drive(int base);                // нэг алхам (base = урагш PWM, сөрөг=урагш)
+long    TTT_Drive_Counts(void);             // эхлэлээс явсан зай (урагш = эерэг)
+
 /* ---- Gyro-д суурилсан эргэлт --------------------------------------------- */
 uint8_t Gyro_TurnAngle(float angle);  // харьцангуй өнцгөөр эргэх (non-blocking)
 void    Gyro_TurnReset(void);         // эргэлтийг таслах / эхнээс нь эхлүүлэх
@@ -31,6 +41,16 @@ void    Gyro_Turn_Test(void);         // D-Left/D-Right→90°, D-Down→тас�
 void    Gyro_Strafe_Test(void);       // рак 600 + ✕→1сек зүүн/1сек баруун (gyro чиг барих)
 void    Strafe_Gyro(int vx);          // gyro-гоор strafe (vx>0 баруун, vx<0 зүүн) — grab-д
 void    Drive_Straight_Test(void);    // ЗӨВХӨН шулуун явах: D-Up сэлгэх, L1/R1 хурд
+void    Drive_Distance_Test(void);    // △→зай яв, ✕→зогс, L1/R1→зай ∓ (OLED-оор)
+
+/* ---- Цэнхэр тал: платформ руу очих траекторууд -------------------------- */
+void    blue_go_3_reset(void);        // 3-р платформ эхлүүлэх
+uint8_t blue_go_3(void);              // 3-р: 3400 урагш → 1сек зүүн strafe (1=дуусав)
+void    blue_go_2_reset(void);        // 2-р платформ эхлүүлэх
+uint8_t blue_go_2(void);              // 2-р: 3400 → зүүн90 → 4000 → баруун90 (1=дуусав)
+void    blue_go_1_reset(void);        // 1-р платформ эхлүүлэх
+uint8_t blue_go_1(void);              // 1-р: 3400 → 8000 → баруун90 (1=дуусав)
+void    Blue_Go_Test(void);           // △→go3 ○→go2 □→go1 ✕→зогс (OLED-оор)
 void    Link_Status_Test(void);     // PCB2 руу PS5 дамжуулж буй эсэхийг харах
 int     Rack_Preset_Buttons(void);    // рак preset товчны логик (OLED-гүй), буц: зорилт
 int     Servo_Preset_Buttons(void);   // серво товчны логик (OLED-гүй), буц: өнцөг

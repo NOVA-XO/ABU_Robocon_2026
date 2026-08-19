@@ -21,7 +21,16 @@ int  applyDeadzone(int v);            // джойстик утгыг үхмэл 
 void runner(void);                    // джойстикоор differential (tank) жолоодлого
 
 /* ---- Актуатор удирдлага -------------------------------------------------- */
-void solenoidControl(void);           // L1/R1/L2/R2 → соленоид 1..4 (debounce + toggle)
+void solenoidControl(void);           // L1→sol1 R1→sol3+4 L2→sol2 (debounce + toggle)
+
+/* ---- 2 PCB: main.c-д R1_PCB (1/2)-аар сонгож build хийнэ ----------------- */
+void robot1_pcb1(void);               // 1-р PCB: жолоо+соленоид+мотор5/6 (main loop бие)
+void robot1_pcb2(void);               // 2-р PCB: удирдлага (бөглөнө)
+
+/* ---- 2 PCB хоорондын UART4 холбоо: [0x0A][pwm1][pwm2][pwm3][0x0D] (main.c) - */
+void r1_link_send3(uint8_t p1, uint8_t p2, uint8_t p3);  // PCB1 → PCB2 руу 3 pwm илгээх
+extern volatile uint8_t r1_link_p1, r1_link_p2, r1_link_p3; // PCB2: ирсэн pwm-ууд
+extern volatile uint8_t r1_link_new;  // PCB2: 1=шинэ багц (уншаад 0 болгоно)
 
 /* ---- ADC / OLED туслах --------------------------------------------------- */
 uint16_t Read_PC3(void);
