@@ -1,64 +1,68 @@
-# ABU Robocon 2026 — Robot2 (Автомат робот)
+# ABU Robocon 2026 — Robot2 · PCB2 (Авирах / шоо-авах)
 
-STM32F407 дээр суурилсан **автомат** роботын firmware. PS5 контроллероор (ESP32
-гүүрээр дамжуулан) удирдах, mecanum жолоо, encoder-т суурилсан rack PID,
-LPMS-BE2 gyro-гоор чиг баримжаа барих, OLED дэлгэц зэргийг агуулна.
+STM32F407 дээр суурилсан **автомат** роботын **PCB2** firmware. Энэ самбар нь шоо-авах
+механикийг (sun/moon араа, соленоид) удирдаж, **tic-tac-toe тактик**-аар аль scroll-ыг
+хэзээ авахыг шийддэг. Жолоо/авиралт/gyro нь **PCB1** дээр —
+[`../Robot2_Code`](../Robot2_Code). Хоёр самбар USART2 линкээр уялдана.
 
 > 🎮 Гар удирдлагатай робот → [`../Robot1_Code`](../Robot1_Code) ·
-> хоёул нэг ижил PCB дээр ажиллана → [../README.md](../README.md)
+> монорепо тайлбар → [../README.md](../README.md)
 
 ## Онцлог (Features)
 
-- **Mecanum жолоо** — 4 моторын inverse kinematics (`runner`)
-- **Rack PID** — Мотор 5, 6-г encoder-аар тогтсон байрлалд PID-ээр барих.
-  TIM7 ISR (`Rack_Service`) дотор тасралтгүй ажиллаж, зогсож байхад ч байрлалыг барина.
-- **Gyro (LPMS-BE2)** — UART stream, харьцангуй өнцгөөр эргэх (`Gyro_TurnAngle`),
-  шулуун явах (`Drive_Straight`), anchor чиг баримжаа
-- **Автомат дараалал** — non-blocking sequence блокууд (`up_20/down_20/up_40/down_40`),
-  red/blue талын угсралт
-- **PS5 контроллер** — ESP32 гүүр 23 байтын packet-ийг 100 Hz-ээр UART-аар илгээнэ
-- **Периферал** — SSD1306 OLED, PCA9685, соленоид, серво, BLDC
+- **Sun / Moon араа** — Мотор 5 (sun, encoder0) ба Мотор 6 (moon, encoder1)-ийг тогтсон
+  байрлалд PID-ээр барих (`sun_hold` / `moon_hold`). `moon_hold` нь тэвчих бүсэд зөөлөн
+  P-барилттай — робот хөдлөх үед moon чөлөөт дрифт хийхээс сэргийлнэ
+- **Соленоид** — `controlSolenoid(1..8)`; grab дараалалд sol1/sol2/sol5 ашиглана
+- **Шоо-авах дараалал** — `grab_front_{up,down}_20_{f,b}`: sun эргүүлэх → moon грип →
+  strafe (PCB1 хийнэ) → соленоид атгах. `f` = урд гар, `b` = ард гар. up-д `val5` limit
+  switch-ээр эрт зогсоох
+- **Tic-tac-toe тактик** — 4×3 grid дээр scroll (ST_R2)-ыг тэмдэглэн, хамгийн сайн
+  баганаг (route) сонгож PCB1 руу илгээнэ. `query_grab_decision` нь робот тухайн блок
+  дээрээ ДАРААГИЙН (дээд) блокийн scroll-ыг авахаар шийднэ. Grab-ийн ээлж: 1-р шоо урд
+  гар, 2-р шоо ард гар (`grab_n`). Шинэ QUERY(yes)-ээр л grab зэвсэглэнэ (`grab_armed`)
+- **`PCB2_Manual` (мод 0)** — гараар турших: зүүн стик Y→sun, баруун стик Y→moon;
+  ▭→sol1, ○→sol2, △→sol5 (toggle)
+- **`Grab_Test` (мод 2)** — grab дараалал бүрийг тусад нь турших (△/○/□/D-Down/D-Right)
+- **`tictactoe` (PCB2 тал)** — PCB1-ийн tictactoe маневрын үед sol5 асаах
+
+## PCB хоорондын линк (USART2, PCB1-тэй)
+
+PCB2 нь **PCB1** (их бие)-тэй **USART2** дээр холбогдоно. PS5 өгөгдөл ч энэ шугамаар
+PCB1-ээс дамжиж ирдэг (magic байтаар ялгана):
+
+- **PCB1 → PCB2:** `QUERY [0xC3][block][0x0A]`, `GRAB [0xC1][0xC2][type][0x0A]`
+  (type 0=down, 1=up)
+- **PCB2 → PCB1:** `[0xB2]` preview, `[0xB3]` SET(route), `[0xB6]` grab-ans,
+  `[0xB5]` grab-done, `[0xB7]` strafe (0=зогс/1=зүүн/2=баруун)
 
 ## Тоног төхөөрөмж (Hardware)
 
 | Зүйл | Тодорхойлолт |
 |------|--------------|
 | MCU | STM32F407 |
-| Gyro/IMU | LPMS-BE2 (UART4) |
 | Дэлгэц | SSD1306 OLED (I2C2) |
-| Контроллер | PS5 → ESP32 → UART (USART3) |
-| Мотор | 6 × DC (encoder-тэй), серво, BLDC, brush |
+| PCB1-тэй линк + PS5 | USART2 |
+| Serial telemetry | UART4 (115200) — moon/grab оношилгоо |
+| Мотор | Мотор 5 = sun араа, Мотор 6 = moon араа (encoder-тэй) + соленоид |
 
 ## Файлын бүтэц (Core/Src)
 
 | Файл | Үүрэг |
 |------|-------|
-| `main.c` | Entry point, periphery init, PS5 packet задлах |
-| `default.c` | Суурь драйвер (мотор, соленоид, серво, UART) |
-| `general.c` | Өндөр түвшний хөдөлгөөн (mecanum, rack PID, gyro эргэлт) |
-| `lpms.c` | LPMS-BE2 IMU драйвер + gyro PID |
-| `sequence.c` | Нийтлэг non-blocking дарааллын блокууд |
-| `red.c` / `blue.c` | Улаан / цэнхэр талын автомат код |
-| `test.c` | Тоног төхөөрөмжийн тест функцууд |
-| `bno055.c`, `pca9685.c`, `ssd1306*.c` | Гуравдагч этгээдийн сангууд |
-
-## Контроллерын буулгалт (control_data)
-
-PS5 packet-ийг STM32 тал дээр `control_data[5][4]`-д задалдаг:
-
-- `[0][0..3]` — джойстик: LStickX, LStickY, RStickX, RStickY (−100..100)
-- `[1][0..3]` — Cross, Square, Triangle, Circle
-- `[2][0..3]` — D-pad: Down, Right, Up, Left
-- `[3][0..3]` — **L1, R1, L2, R2**
-- `[4][0..3]` — Share, Options, L3, R3
+| `main.c` | Entry point, periphery init, USART2 линк RX (GRAB/QUERY задлах) |
+| `default.c` | Горим сонголт (`selectMode`), `controlSolenoid` |
+| `general.c` | Sun/moon PID, `grab_front_*` дараалал, `PCB2_Manual`, `Grab_Test`, `tictactoe` |
+| `tactic.c` | Tic-tac-toe grid, route төлөвлөлт, grab шийдвэр (`query_grab_decision`) |
+| `ssd1306*.c` | Гуравдагч этгээдийн сангууд |
 
 ## Build
 
 STM32CubeIDE (CMake) төсөл:
 
 ```
-cmake -S . -B build -G Ninja
-cmake --build build
+cmake --preset Debug
+cmake --build --preset Debug
 ```
 
 Хэрэглэгчийн эх файлуудыг `CMakeLists.txt`-ийн `target_sources`-д нэмдэг.
@@ -66,6 +70,5 @@ cmake --build build
 
 ## ESP32 PS5 гүүр
 
-Хоёр роботод нийтлэг ESP32 гүүр репо root-д: [`../ps5_esp32_bridge/`](../ps5_esp32_bridge).
-ESP32 дээр Arduino IDE-гээр ачаална (STM32 build-д ороогүй). PS5 контроллерийг
-Bluetooth-оор холбож, 23 байтын packet-ийг UART-аар STM32 руу илгээнэ.
+PS5 нь ESP32 гүүрээр [`../ps5_esp32_bridge/`](../ps5_esp32_bridge) PCB1 руу ирж, тэндээс
+USART2-оор PCB2 руу дамждаг. ESP32 кодыг Arduino IDE-гээр ачаална (STM32 build-д ороогүй).
