@@ -1194,6 +1194,10 @@ static int servo_deg_to_units(int deg) {
     deg = 0;
   if (deg > SERVO_DEG_MAX)
     deg = SERVO_DEG_MAX;
+  /* ⚠ Серво ЭРГҮҮЛЖ суурилуулсан — hardware руу ЭСРЭГ өнцөг илгээнэ (global
+     flip). Логик өнцөг (g_servo_deg) хэвээр — auto дараалал БА гарын △ preset
+     хоёул энэ нэг цэгээр дамжих тул нэг мөрөөр зөв болно. Утсаа буцаавал устга. */
+  deg = SERVO_DEG_MAX - deg;
   return (deg * SERVO_UNIT_MAX) / SERVO_DEG_MAX; // 180° → 24000
 }
 
