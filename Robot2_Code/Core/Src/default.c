@@ -8,6 +8,7 @@
  */
 #include "default.h"
 #include "blue.h" // weapon_blue
+#include "red.h"  // weapon_red
 #include "pca9685.h"
 #include "sequence.h" // climb_1/2/3
 #include "string.h"
@@ -128,7 +129,7 @@ static const char *const mode_name[] = {
     "Auto climb", //  1  PCB2 route (USART2)-оор climb_1/2/3 автоматаар (PCB2
                   //  мод 1-тэй)
     "Grab strafe",     //  2  PCB2 мод 2 (Grab test)-тэй ХАМТ: 0xB7 дагаж strafe
-    "Sensor v1-v8",    //  3
+    "RUN red",         //  3  автомат: улаан тал (weapon_red — blue-ийн толин тусгал)
     "Motor",           //  4
     "Solenoid",        //  5
     "Servo",           //  6
@@ -152,6 +153,7 @@ static const char *const mode_name[] = {
     "Blue go 1/2/3",  // 24  цэнхэр платформ траектор: △→3 ○→2 □→1 ✕→зогс
     "Exit test",      // 25  ГАРАХ маневрын рак-сунах хэсэг (D-Up эхлүүл)
     "Tictactoe",      // 26  exit-ийн дараах straight drive → val5==0 (D-Up эхлүүл)
+    "ADC check",      // 27  PC3 (ADC1_IN13) raw утгыг OLED дээр харах
 };
 #define MODE_COUNT ((int)(sizeof(mode_name) / sizeof(mode_name[0])))
 
@@ -228,10 +230,10 @@ void selectMode(void) {
       Grab_Strafe_Test();
     }
 
-  case 3:
+  case 3: // автомат: УЛААН тал (weapon_red — blue-ийн толин тусгал)
     while (true) {
-      test_sensor();
-    }
+      weapon_red();
+    } // дотроо Rack_Fault шалгана
 
   case 4:
     while (true) {
@@ -374,6 +376,11 @@ void selectMode(void) {
   case 26: // TICTACTOE: exit-ийн дараах straight drive → val5==0 (D-Up эхлүүл)
     while (true) {
       Tic_Tac_Toe_Test();
+    }
+
+  case 27: // ADC CHECK: PC3 (ADC1_IN13) raw утгыг OLED дээр харах
+    while (true) {
+      Read_PC3_OLED();
     }
 
   default:
